@@ -168,5 +168,24 @@ class AccountTests(unittest.TestCase):
             self.assertIn("--dry-run", call.call_args.args[0])
 
 
+class WorkflowEnvironmentTests(unittest.TestCase):
+    def test_default_hosting_environment_kept(self):
+        text = (ROOT / '.github/workflows/hostinger.yml').read_text()
+        self.assertIn('default: hostinger', text)
+        self.assertIn('name: ' + ' + '{{ inputs.hosting }}', text)
+
+    def test_hosting_environments_are_allowlisted(self):
+        text = (ROOT / '.github/workflows/hostinger.yml').read_text()
+        expected = 'options: [hostinger, ' + ', '.join('hostinger-' + str(i) for i in range(2, 11)) + ']'
+        self.assertIn(expected, text)
+
+    def test_manual_only_and_secret_boundaries(self):
+        text = (ROOT / '.github/workflows/hostinger.yml').read_text()
+        self.assertIn('workflow_dispatch:', text)
+        self.assertNotIn('schedule:', text)
+        self.assertIn("if: github.ref == 'refs/heads/main'", text)
+        for name in ('HOSTINGER_SITES_JSON', 'HOSTINGER_SSH_PRIVATE_KEY', 'HOSTINGER_SSH_KNOWN_HOSTS'):
+            self.assertIn('secrets.' + name, text)
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,3 +19,11 @@ Controller: webactueel-workflow.
 - Hostinger's existing backup service remains provider-owned.
 - CI: \`python3 -m unittest discover -s tests -v\`.
 - Validate sample: \`python3 scripts/hostinger.py validate --config config/sites.example.json\`.
+
+- For multi-package hosting, use fixed allowlisted GitHub Environments `hostinger` and
+  `hostinger-2` through `hostinger-10`, each with its own three Environment secrets.
+- Preserve the existing `hostinger` default, never transfer keys between packages,
+  and do not use a single cross-account credential registry in source code.
+- `site` input is optional for account-wide connect/list, but required and scoped
+  to the chosen Environment for preview/deploy. Keep site IDs globally unique
+  across Environments to avoid accidental payload reuse.

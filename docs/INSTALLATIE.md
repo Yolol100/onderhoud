@@ -117,3 +117,35 @@ Test kritieke WordPress-/WooCommerce-functionaliteit eerst op staging.
 
 Meer info: https://support.hostinger.com/en/articles/1583245-how-to-connect-to-a-hosting-plan-via-ssh
 GitHub Secrets: https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
+
+## 7. Meerdere hostingpakketten met eigen IP of SSH-gebruiker
+
+**Eerst het verschil:** Meerdere websites en webshops onder exact hetzelfde SSH-pakket vallen al onder dezelfde Environment. Als Hostinger bij een tweede hostingpakket een andere SSH-opdracht geeft, gebruik je een nieuwe Environment. Je hoeft geen tweede repository te maken.
+
+1. Ga in Hostinger naar **Websites → Dashboard → SSH Access** van het **andere hostingpakket**. Noteer de nieuwe SSH-opdracht (IP, gebruikersnaam, poort).
+2. Maak in [dezelfde GitHub repository → Settings → Environments](https://github.com/Yolol100/onderhoud/settings/environments) een **nieuwe Environment** met de naam `hostinger-2`. Voor volgende pakketten bestaan keuzes `hostinger-3` tot en met `hostinger-10`.
+3. Maak bij voorkeur op Windows voor dit pakket een **aparte SSH-sleutel**:
+
+       ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\hostinger_onderhoud_2" -C "github-hostinger-2"
+
+   Druk bij een nieuwe automationsleutel tweemaal op Enter voor een lege passphrase. Voeg uitsluitend het bestand `hostinger_onderhoud_2.pub` toe bij **SSH Access → Add SSH key** van **hostingpakket 2**. Overschrijf de sleutel van pakket 1 niet.
+4. Verbind eerst lokaal via PowerShell met de nieuwe IP/gebruiker/poort én nieuwe sleutel. Controleer de **serverhostkey-fingerprint onafhankelijk via Hostinger** voordat je die als vertrouwd opslaat.
+5. Voeg onder **Environment secrets van `hostinger-2`** weer dezelfde drie **namen** toe, maar met de gegevens van pakket 2:
+   - `HOSTINGER_SSH_PRIVATE_KEY`: inhoud van je nieuwe geheime SSH-sleutel (`Get-Content "$env:USERPROFILE\.ssh\hostinger_onderhoud_2" -Raw | Set-Clipboard`). Nooit in chat of repo plakken.
+   - `HOSTINGER_SSH_KNOWN_HOSTS`: onafhankelijk geverifieerde regel voor **dit nieuwe IP en deze poort**. Je kunt hem na verificatie ophalen met `ssh-keygen -F "[NIEUW_IP]:NIEUWE_POORT" -f "$env:USERPROFILE\.ssh\known_hosts"`.
+   - `HOSTINGER_SITES_JSON`: hetzelfde versie-2-formaat, maar met **nieuwe accountgegevens** en voorlopig een lege sites-lijst. Bijvoorbeeld:
+
+       {
+         "version": 2,
+         "account": {"host": "NIEUW_IP", "user": "u123456789", "port": 65002},
+         "sites": {}
+       }
+
+   Vervang `NIEUW_IP`, `u123456789` en de poort door wat Hostinger bij dit tweede pakket toont.
+6. Ga naar [Actions → Hostinger SSH - handmatig](https://github.com/Yolol100/onderhoud/actions/workflows/hostinger.yml), kies bij **Hosting** `hostinger-2`, laat **Site** leeg en kies **Mode** `connect`. Dit verandert niets aan de server. Met `list` kun je daarna het aantal zichtbare domeinmappen controleren.
+7. Herhaal alleen de stappen 1–6 voor een **derde of volgende hostingpakket** (`hostinger-3`, enz.). De bestaande Environment `hostinger` voor pakket 1 blijft onveranderd.
+
+**Later publiceren:** Elke Environment heeft een eigen `sites`-lijst. Publiceren blijft alleen mogelijk voor een expliciete theme/plugin-map met `preview` en `DEPLOY:<site-ID>`. Gebruik unieke site-ID's over alle pakketten om vergissingen te voorkomen; bestanden onder `payload/<site-ID>/` zijn repositorybreed. Geen automatische WordPress- of WooCommerce-updates, back-ups of crons.
+
+**Let op:** GitHub-Environment-toegang en goedkeuringsregels verschillen per GitHub-abonnement en repo-zichtbaarheid. Bewaar geheimen alleen in de juiste Environment. Als een pakket geen SSH ondersteunt, kan deze route dat pakket niet bereiken.
+

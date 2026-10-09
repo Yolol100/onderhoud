@@ -37,3 +37,7 @@ Er is nog geen echte GitHub → Hostinger SSH-verbinding gevalideerd.
 
 **Let op:** repo-publicatie kan gevoelige code of loggegevens openbaar maken.
 Zet geen private websitebestanden, klantenlijsten of wachtwoorden in deze repo.
+
+## Meerdere Hostinger-hostingpakketten
+
+De workflow heeft nu een keuzelijst **Hosting**: `hostinger` (bestaand), `hostinger-2` tot en met `hostinger-10`. Elk pakket krijgt zijn eigen GitHub Environment met de **zelfde drie secretnamen maar andere SSH-gegevens**. De bestaande koppeling `hostinger` blijft behouden. Een tweede IP of SSH-gebruiker betekent normaal een nieuwe hostingomgeving; meerdere websites onder één hostingpakket hebben die niet nodig. Zie [de stappen](docs/INSTALLATIE.md#7-meerdere-hostingpakketten-met-eigen-ip-of-ssh-gebruiker).

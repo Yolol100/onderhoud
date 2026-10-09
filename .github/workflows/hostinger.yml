@@ -3,6 +3,12 @@ name: Hostinger SSH - handmatig
 on:
   workflow_dispatch:
     inputs:
+      hosting:
+        description: 'Kies hostingpakket; elk heeft eigen Environment secrets'
+        required: true
+        default: hostinger
+        type: choice
+        options: [hostinger, hostinger-2, hostinger-3, hostinger-4, hostinger-5, hostinger-6, hostinger-7, hostinger-8, hostinger-9, hostinger-10]
       site:
         description: 'Leeg voor hosting-check of lijst; ID alleen voor preview/deploy'
         required: false
@@ -29,11 +35,12 @@ concurrency:
 
 jobs:
   hostinger:
-    name: Hele hostingaccount controleren of gerichte site-deploy
+    name: Gekozen hostingpakket controleren of gerichte site-deploy
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    environment: hostinger
+    environment:
+      name: ${{ inputs.hosting }}
     steps:
       - name: Checkout van main
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
