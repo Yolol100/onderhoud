@@ -4,15 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       site:
-        description: 'Site-ID uit HOSTINGER_SITES_JSON'
-        required: true
+        description: 'Leeg voor hosting-check of lijst; ID alleen voor preview/deploy'
+        required: false
+        default: ''
         type: string
       mode:
-        description: 'Eerst connect, daarna preview en optioneel deploy'
+        description: 'connect / list = hele hostingaccount; preview / deploy = per site'
         required: true
         default: connect
         type: choice
-        options: [connect, preview, deploy]
+        options: [connect, list, preview, deploy]
       confirm:
         description: 'Alleen bij deploy exact DEPLOY:<site-ID> typen'
         required: false
@@ -28,7 +29,7 @@ concurrency:
 
 jobs:
   hostinger:
-    name: Exacte site, handmatige actie
+    name: Hele hostingaccount controleren of gerichte site-deploy
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25

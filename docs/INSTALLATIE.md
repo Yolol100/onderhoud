@@ -1,55 +1,93 @@
-# Handleiding: GitHub verbinden met Hostinger
+# GitHub koppelen aan ALLE websites binnen één Hostinger-hostingaccount
 
-Hiermee kan GitHub automatisch een SSH-verbinding maken wanneer jij dat
-handmatig start. Je hoeft geen plugin, Go-server of extra MCP te installeren.
-Er zijn geen automatische website-updates, back-ups of onderhoudsscripts.
+Je hebt al bevestigd dat je vanuit Windows via SSH met Hostinger kunt
+inloggen zonder wachtwoord en dat \`rsync\` beschikbaar is. Je hoeft geen
+aparte SSH-sleutel per domein aan te maken. De SSH-toegang geldt alleen
+voor de websites/mappen waarop die Hostinger-gebruiker rechten heeft.
 
-## 1. Zet SSH aan op Hostinger
+Er komen geen automatische updates, onderhoudsscripts, cronjobs of back-ups bij.
 
-- Hostinger hPanel -> Websites -> Dashboard -> SSH Access -> Enable.
-- Noteer SSH-host of IP-adres, SSH-gebruikersnaam en SSH-poort.
-- Voor veel Web/Cloud-pakketten is de poort 65002; controleer die in hPanel.
-- SSH/rsync moeten door je hostingpakket worden ondersteund.
+## 1. Open de GitHub-instellingen
 
-## 2. Maak een losse SSH-sleutel
+Ga naar https://github.com/Yolol100/onderhoud/settings/environments
 
-Op je eigen computer met OpenSSH:
+Maak een Environment aan met exact de naam **hostinger**. Kies binnen
+Environment secrets voor **Add secret**.
 
-    ssh-keygen -t ed25519 -f hostinger_onderhoud -N "" -C "github-onderhoud"
+## 2. Geheim 1: HOSTINGER_SSH_PRIVATE_KEY
 
-- Voeg ALLEEN hostinger_onderhoud.pub toe bij hPanel -> SSH Access -> Add SSH key.
-- Bewaar hostinger_onderhoud (zonder .pub) vertrouwelijk; zet hem NOOIT in Git.
-- Deze aparte, niet-met-wachtzin beveiligde sleutel wordt alleen door het
-  afgeschermde GitHub Actions Secret gebruikt.
+Open **Windows PowerShell** en voer uit:
 
-## 3. Controleer de serveridentiteit
+    Get-Content "$env:USERPROFILE\.ssh\hostinger_onderhoud" -Raw | Set-Clipboard
 
-- Haal de publieke SSH-hostkey op voor host/IP + poort.
-- Vergelijk de fingerprint met een onafhankelijk bevestigde serverfingerprint,
-  bijvoorbeeld via een vertrouwd Hostinger-kanaal.
-- Zet pas daarna de volledige geverifieerde known_hosts-regel in GitHub.
-- Bij niet-standaardpoort heeft die de vorm:
-  [SSH_HOST]:POORT ssh-ed25519 DE_PUBLIEKE_HOST_SSH_KEY
-- Blind een resultaat van ssh-keyscan vertrouwen is onvoldoende.
+Plak de geheime SSH-sleutel uitsluitend als waarde van GitHub Environment
+Secret \`HOSTINGER_SSH_PRIVATE_KEY\`. Zet deze nooit in een GitHub-bestand,
+issue of ChatGPT-gesprek.
 
-## 4. Zet in GitHub drie geheime waarden
+## 3. Geheim 2: HOSTINGER_SSH_KNOWN_HOSTS
 
-Repository -> Settings -> Environments -> New environment -> hostinger.
-Voeg onder Environment secrets toe:
+Controleer eerst de Hostinger-serverfingerprint via een onafhankelijk
+vertrouwd Hostinger-kanaal. Haal dan de geverifieerde known_hosts-regel op
+in Windows PowerShell:
 
-- HOSTINGER_SSH_PRIVATE_KEY = volledige inhoud van hostinger_onderhoud (privé).
-- HOSTINGER_SSH_KNOWN_HOSTS = geverifieerde known_hosts-regel.
-- HOSTINGER_SITES_JSON = onderstaande JSON met jouw echte site(s).
+    ssh-keygen -F "[81.16.31.38]:65002" -f "$env:USERPROFILE\.ssh\known_hosts" |
+      Where-Object { $_ -notmatch '^#' } | Set-Clipboard
 
-Voorbeeldstructuur van HOSTINGER_SITES_JSON:
+Plak dit bij GitHub Environment Secret \`HOSTINGER_SSH_KNOWN_HOSTS\`.
+De hostkey is NIET dezelfde als je eigen SSH-key.
+
+## 4. Geheim 3: HOSTINGER_SITES_JSON
+
+**Je hoeft GEEN domeinnaam te kiezen om de hele hosting te controleren.**
+
+Voeg onder Environment secrets een derde secret toe met de naam
+\`HOSTINGER_SITES_JSON\` en deze inhoud:
 
     {
-      "version": 1,
+      "version": 2,
+      "account": {
+        "host": "81.16.31.38",
+        "user": "u919867035",
+        "port": 65002
+      },
+      "sites": {}
+    }
+
+Hiermee koppel je één hostingaccount. \`sites\` mag leeg blijven voor
+\`connect\` en \`list\`. Later kun je per website een specifiek doel
+registreren voor beperkte uploads. Je hoeft daarvoor geen nieuwe SSH-key.
+
+## 5. Test de gehele hosting via GitHub
+
+Ga naar https://github.com/Yolol100/onderhoud/actions/workflows/hostinger.yml
+Klik **Run workflow** en kies:
+
+- Branch: main
+- Site: leeg laten
+- Mode: connect
+- Confirm: leeg laten
+
+Groene melding \`CONNECT OK\` betekent dat GitHub veilig verbinding maakt
+met het Hostinger-account en rsync aanwezig is. Er verandert niets.
+
+Start daarna eventueel nog eens met **mode list**. Dat telt de
+bereikbare domeinmappen onder \`~/domains\`, maar laat vanwege de
+openbare GitHub-logs geen namen zien. Dit is niet hetzelfde als
+automatisch alle websites en webshops beheren.
+
+## 6. Later: 1 website gericht bijwerken (optioneel)
+
+Voor \`preview\` en \`deploy\` voeg je een target toe onder \`sites\`:
+
+    {
+      "version": 2,
+      "account": {
+        "host": "81.16.31.38",
+        "user": "u919867035",
+        "port": 65002
+      },
       "sites": {
         "mijn-thema": {
-          "host": "123.123.123.123",
-          "user": "u123456789",
-          "port": 65002,
           "domain": "example.com",
           "type": "theme",
           "slug": "demo-theme",
@@ -58,49 +96,24 @@ Voorbeeldstructuur van HOSTINGER_SITES_JSON:
       }
     }
 
-- Site-ID = de naam onder sites, hier mijn-thema.
-- type is uitsluitend theme of plugin.
-- De gekozen plugin/thema-map op Hostinger moet al bestaan.
-- De doelmap wordt automatisch opgebouwd:
-  /home/USER/domains/DOMEIN/public_html/wp-content/themes/SLUG
-  of /home/USER/domains/DOMEIN/public_html/wp-content/plugins/SLUG
-- Het script kan maximaal 25 sites registreren. Gebruik per hostingaccount
-  een eigen SSH-sleutel en een afzonderlijke Action/omgeving indien nodig.
-- Beperk de omgeving bij voorkeur tot main en stel waar mogelijk goedkeuring in.
-- Als Environment secrets niet beschikbaar zijn bij je GitHub-plan, kun je
-  repository secrets gebruiken, maar controleer het beveiligingsbeleid.
+Vervang \`example.com\` en \`demo-theme\` door je werkelijke
+WordPress-domein en bestaande themamap. Het uploadpad wordt opgebouwd als
+\`/home/<SSH-gebruiker>/domains/<domein>/public_html/wp-content/themes/<slug>\`.
+Bij \`plugin\` is het pad onder \`wp-content/plugins\`.
 
-## 5. Doe eerst een verbindingscontrole
+Zet de geselecteerde code in \`payload/mijn-thema/\`.
+Run eerst **preview**. Run daarna alleen op jouw verzoek **deploy**
+met bevestiging \`DEPLOY:mijn-thema\`. Er worden geen bestanden verwijderd.
+Test kritieke WordPress-/WooCommerce-functionaliteit eerst op staging.
 
-- GitHub -> Actions -> Hostinger SSH - handmatig -> Run workflow.
-- site = mijn-thema (of jouw gekozen site-ID).
-- mode = connect. Geen payload nodig en geen bestanden gewijzigd.
-- Maak daarna alleen een maptak payload/mijn-thema met de gewenste code.
-- WordPress-thema heeft een style.css nodig.
-- WordPress-plugin heeft een PHP-hoofdbestand op hoofdniveau nodig.
-- mode = preview: toont de bestandsverschillen zonder te schrijven.
-- mode = deploy: typ in confirm exact DEPLOY:mijn-thema.
-- Het script voert checksumvergelijking en basis HTTPS-controle uit.
+## Beperkingen
 
-## Heel belangrijk
+- \`connect\` en \`list\` zijn alleen controles, zonder schrijfacties.
+- Eén SSH-account kan meerdere sites zien, maar geen onbegrensde root
+  of hPanel-eigendomsrechten. Andere hostingaccounts vragen apart toegang.
+- Geen vrije servercommando's en geen onbeveiligde bestandswijzigingen.
+- Hostinger beheert eigen back-ups. Deze repo automatiseert dat niet.
+- De repo is op dit moment openbaar: publiceer geen geheime sitebestanden.
 
-- Deze repo was bij aanmaak OPENBAAR. Maak hem prive voordat je eigen
-  klantcode, websites of andere vertrouwelijke bestanden commit.
-- Er is geen geplande/publicatie-op-push actie. Alleen jij start de workflow.
-- Geen --delete: extra bestaande serverbestanden blijven behouden.
-- SSH-commando's kunnen niet door vrije tekst uit GitHub worden bepaald.
-- Geen SQL, database, WordPress-updates, back-ups, rollbackautomatisering of
-  serverinstellingen. Die activiteiten staan buiten deze repo.
-- De bestaande Hostinger-back-ups worden niet gewijzigd. Controleer zelf
-  of het laatst beschikbare herstelpunt aanwezig en bruikbaar is.
-- Test op staging als dat kan. Check na een deploy ook WooCommerce checkout,
-  pluginactivatie, themaweergave en Elementor als van toepassing.
-- Bij fouten stopt de Action. Er wordt niet blind opnieuw gepubliceerd.
-
-## Officiele bronnen
-
-- https://support.hostinger.com/en/articles/1583645-how-to-enable-ssh-access
-- https://support.hostinger.com/en/articles/5634532-how-to-generate-ssh-keys-and-add-them-to-hpanel
-- https://www.hostinger.com/support/how-to-use-rsync-to-sync-files-and-directories-at-hostinger/
-- https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
-- https://docs.github.com/en/actions/reference/security/secure-use
+Meer info: https://support.hostinger.com/en/articles/1583245-how-to-connect-to-a-hosting-plan-via-ssh
+GitHub Secrets: https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
