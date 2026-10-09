@@ -172,7 +172,7 @@ class WorkflowEnvironmentTests(unittest.TestCase):
     def test_default_hosting_environment_kept(self):
         text = (ROOT / '.github/workflows/hostinger.yml').read_text()
         self.assertIn('default: hostinger', text)
-        self.assertIn('name: ' + ' + '{{ inputs.hosting }}', text)
+        self.assertIn('name: ' + chr(36) + '{{ inputs.hosting }}', text)
 
     def test_hosting_environments_are_allowlisted(self):
         text = (ROOT / '.github/workflows/hostinger.yml').read_text()
