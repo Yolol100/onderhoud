@@ -169,15 +169,16 @@ class AccountTests(unittest.TestCase):
 
 
 class WorkflowEnvironmentTests(unittest.TestCase):
-    def test_default_hosting_environment_kept(self):
+    def test_first_hosting_environment_is_explicit(self):
         text = (ROOT / '.github/workflows/hostinger.yml').read_text()
-        self.assertIn('default: hostinger', text)
+        self.assertIn('default: hostinger-1', text)
         self.assertIn('name: ' + chr(36) + '{{ inputs.hosting }}', text)
 
     def test_hosting_environments_are_allowlisted(self):
         text = (ROOT / '.github/workflows/hostinger.yml').read_text()
-        expected = 'options: [hostinger, ' + ', '.join('hostinger-' + str(i) for i in range(2, 11)) + ']'
+        expected = 'options: [' + ', '.join('hostinger-' + str(i) for i in range(1, 11)) + ']'
         self.assertIn(expected, text)
+        self.assertNotIn('options: [hostinger, ', text)
 
     def test_manual_only_and_secret_boundaries(self):
         text = (ROOT / '.github/workflows/hostinger.yml').read_text()

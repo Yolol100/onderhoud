@@ -6,9 +6,9 @@ on:
       hosting:
         description: 'Kies hostingpakket; elk heeft eigen Environment secrets'
         required: true
-        default: hostinger
+        default: hostinger-1
         type: choice
-        options: [hostinger, hostinger-2, hostinger-3, hostinger-4, hostinger-5, hostinger-6, hostinger-7, hostinger-8, hostinger-9, hostinger-10]
+        options: [hostinger-1, hostinger-2, hostinger-3, hostinger-4, hostinger-5, hostinger-6, hostinger-7, hostinger-8, hostinger-9, hostinger-10]
       site:
         description: 'Leeg voor hosting-check of lijst; ID alleen voor preview/deploy'
         required: false

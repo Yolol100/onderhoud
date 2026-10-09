@@ -1,43 +1,40 @@
-# Hostinger SSH-account - GitHub Actions
+# Hostinger SSH - GitHub Actions
 
-Deze repository gebruikt **één SSH-verbinding met het Hostinger-hostingaccount**
-waar jouw websites onder vallen. Je hoeft dus geen apart account of SSH-sleutel
-per website aan te maken.
+Een GitHub-repository voor meerdere afzonderlijke Hostinger-hostingpakketten.
+De GitHub Actions-keuzelijst gebruikt consequent `hostinger-1` tot en met
+`hostinger-10`; elk pakket heeft zijn eigen GitHub Environment en SSH-sleutel.
 
-**Handmatig en veilig:**
-- connect: controleert de SSH-verbinding voor het hele hostingaccount.
-- list: telt bereikbare domeinmappen zonder klantdomeinen in openbare logs te tonen.
-- preview: toont alleen verschillen in een vooraf geregistreerde plugin/thema-map.
-- deploy: publiceert alleen die geselecteerde bestanden na expliciete bevestiging.
+## Wat kun je doen?
 
-Geen automatische WordPress-updates, onderhoud, cron, SQL, back-ups, MCP of
-willekeurige servercommando's. Bestaande Hostinger-back-ups worden niet aangepast.
+- **connect**: handmatige, alleen-lezen SSH-test voor één gekozen hostingpakket.
+- **list**: telt domeinmappen van dat account zonder domeinnamen te loggen.
+- **preview**: simuleert wijzigingen aan een expliciet geregistreerde WordPress
+  thema- of pluginmap; wijzigt niets op de server.
+- **deploy**: uitsluitend voor een vooraf geregistreerde thema/pluginmap met
+  expliciete typed bevestiging en controle achteraf.
 
-## Begin hier
+Geen automatische WordPress-/WooCommerce-updates, cronjobs, back-upjobs,
+onderhoudsscripts, SQL-commando's of willekeurige shellinvoer. Hostinger beheert
+bestaande providerback-ups.
 
-[Stappenplan voor de hele hosting](docs/INSTALLATIE.md)
+## Opnieuw beginnen
 
-De GitHub Environment \`hostinger\` bevat precies drie Secrets:
-\`HOSTINGER_SSH_PRIVATE_KEY\`, \`HOSTINGER_SSH_KNOWN_HOSTS\`,
-\`HOSTINGER_SITES_JSON\`. Die laatste heeft versie 2: één \`account\`
-en een optionele \`sites\`-lijst. Voor een eerste verbinding mag de lijst leeg zijn.
+Zie [Installatie: Hostinger 1](docs/INSTALLATIE.md). Maak eerst een GitHub
+Environment `hostinger-1` met **drie eigen Environment Secrets**:
+`HOSTINGER_SSH_PRIVATE_KEY`, `HOSTINGER_SSH_KNOWN_HOSTS`,
+`HOSTINGER_SITES_JSON`.
 
-## Technische bestanden
+De werkelijke SSH-server, gebruikersnaam en sleutelgegevens blijven buiten
+de openbare repository. `HOSTINGER_SITES_JSON` bevat versie 2 met één
+`account` per GitHub Environment en optioneel een `sites`-register.
+Een lege `sites`-lijst is voldoende voor de read-only verbindingstest.
 
-- \`.github/workflows/hostinger.yml\` - handmatig, alleen main, serialized
-- \`.github/workflows/ci.yml\` - automatisch alleen code- en testsuite
-- \`scripts/hostinger.py\` - accountcheck, veilige inventaris, beperkte deploy
-- \`tests/test_hostinger.py\` - security-, input- en regressietests
-- \`config/sites.example.json\` - fictief voorbeeld
-- \`AGENTS.md\` - vaste grenzen
+## Veiligheidsgrenzen
 
-Het SSH-account heeft **alleen de rechten die Hostinger aan die gebruiker geeft**.
-Dit geeft geen VPS-root, geen automatische database- of hPanel-toegang.
-Er is nog geen echte GitHub → Hostinger SSH-verbinding gevalideerd.
-
-**Let op:** repo-publicatie kan gevoelige code of loggegevens openbaar maken.
-Zet geen private websitebestanden, klantenlijsten of wachtwoorden in deze repo.
-
-## Meerdere Hostinger-hostingpakketten
-
-De workflow heeft nu een keuzelijst **Hosting**: `hostinger` (bestaand), `hostinger-2` tot en met `hostinger-10`. Elk pakket krijgt zijn eigen GitHub Environment met de **zelfde drie secretnamen maar andere SSH-gegevens**. De bestaande koppeling `hostinger` blijft behouden. Een tweede IP of SSH-gebruiker betekent normaal een nieuwe hostingomgeving; meerdere websites onder één hostingpakket hebben die niet nodig. Zie [de stappen](docs/INSTALLATIE.md#7-meerdere-hostingpakketten-met-eigen-ip-of-ssh-gebruiker).
+- Secrets alleen in GitHub Environments, niet in de repository of chat.
+- Hostkeys altijd onafhankelijk met Hostinger verifiëren.
+- Per hostingpakket een afzonderlijke SSH-sleutel en Environment.
+- Test `connect` vóór de eerste `list`; geen wijzigingen aan websites.
+- Maak de repository privé voordat je klantcode of niet-openbare thema's toevoegt.
+- Nieuwe workflows/tests bewijzen geen live SSH-verbinding totdat `CONNECT OK`
+  op het gekozen pakket in GitHub Actions is bevestigd.
