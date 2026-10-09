@@ -1,0 +1,57 @@
+name: Hostinger SSH - handmatig
+
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: 'Site-ID uit HOSTINGER_SITES_JSON'
+        required: true
+        type: string
+      mode:
+        description: 'Eerst connect, daarna preview en optioneel deploy'
+        required: true
+        default: connect
+        type: choice
+        options: [connect, preview, deploy]
+      confirm:
+        description: 'Alleen bij deploy exact DEPLOY:<site-ID> typen'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-ssh-operations
+  cancel-in-progress: false
+
+jobs:
+  hostinger:
+    name: Exacte site, handmatige actie
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: hostinger
+    steps:
+      - name: Checkout van main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Valideer code voor je SSH gebruikt
+        run: |
+          python3 -m py_compile scripts/hostinger.py
+          python3 -m unittest discover -s tests -v
+          python3 scripts/hostinger.py validate --config config/sites.example.json
+      - name: SSH / simulatie / gecontroleerde upload
+        env:
+          HOSTINGER_SITES_JSON: ${{ secrets.HOSTINGER_SITES_JSON }}
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+          SITE_ID: ${{ inputs.site }}
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/hostinger.py "$MODE" --site "$SITE_ID" --confirm "$CONFIRM"
