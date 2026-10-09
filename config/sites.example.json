@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "sites": {
+    "voorbeeld-thema": {
+      "host": "123.123.123.123",
+      "user": "u123456789",
+      "port": 65002,
+      "domain": "example.com",
+      "type": "theme",
+      "slug": "demo-theme",
+      "health_url": "https://example.com/"
+    }
+  }
+}
