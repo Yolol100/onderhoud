@@ -197,7 +197,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 self.assertFalse(migration.evaluate("hostinger-3", result, p.returncode,
                                                     migration.load_policy()))
-            self.assertIn("zoekbereik niet volledig", log.getvalue())
+            self.assertIn("scriptzoektocht niet volledig of niet betrouwbaar", log.getvalue())
 
     def test_new_workflow_never_runs_updater_or_writes(self):
         workflow = (ROOT / ".github/workflows/hostinger-wordpress-migration-audit.yml").read_text()
