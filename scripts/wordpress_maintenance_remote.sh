@@ -30,12 +30,53 @@ site_paths=()
 site_domains=()
 unsupported_count=0
 multisite_count=0
+# Stable, non-sensitive reason categories for public GitHub Actions logs.
+# No domain names or absolute filesystem paths are printed.
+diag_nonstandard=0
+diag_invalid_domain=0
+diag_symlink=0
+diag_incomplete=0
+diag_core_unavailable=0
+diag_home_unavailable=0
+diag_home_mismatch=0
 inventory_hash=""
+mark_unsupported() {
+  local reason="$1"
+  ((unsupported_count += 1))
+  case "$reason" in
+    nonstandard) ((diag_nonstandard += 1)) ;;
+    invalid_domain) ((diag_invalid_domain += 1)) ;;
+    symlink) ((diag_symlink += 1)) ;;
+    incomplete) ((diag_incomplete += 1)) ;;
+    core_unavailable) ((diag_core_unavailable += 1)) ;;
+    home_unavailable) ((diag_home_unavailable += 1)) ;;
+    home_mismatch) ((diag_home_mismatch += 1)) ;;
+    *) return 1 ;;
+  esac
+}
+emit_diagnostics() {
+  local suffix="$1"
+  printf 'MAINT\tDIAG_NONSTANDARD%s\t%s\n' "$suffix" "$diag_nonstandard"
+  printf 'MAINT\tDIAG_INVALID_DOMAIN%s\t%s\n' "$suffix" "$diag_invalid_domain"
+  printf 'MAINT\tDIAG_SYMLINK%s\t%s\n' "$suffix" "$diag_symlink"
+  printf 'MAINT\tDIAG_INCOMPLETE%s\t%s\n' "$suffix" "$diag_incomplete"
+  printf 'MAINT\tDIAG_CORE_UNAVAILABLE%s\t%s\n' "$suffix" "$diag_core_unavailable"
+  printf 'MAINT\tDIAG_HOME_UNAVAILABLE%s\t%s\n' "$suffix" "$diag_home_unavailable"
+  printf 'MAINT\tDIAG_HOME_MISMATCH%s\t%s\n' "$suffix" "$diag_home_mismatch"
+}
+
 discover_sites() {
   site_paths=()
   site_domains=()
   unsupported_count=0
   multisite_count=0
+  diag_nonstandard=0
+  diag_invalid_domain=0
+  diag_symlink=0
+  diag_incomplete=0
+  diag_core_unavailable=0
+  diag_home_unavailable=0
+  diag_home_mismatch=0
   local candidates file site domain name actual
   candidates="$(mktemp)" || return 1
   if ! find -P "$root" -mindepth 2 \
@@ -50,34 +91,40 @@ discover_sites() {
   fi
   while IFS= read -r -d '' file; do
     site="${file%/wp-load.php}"
-    [[ -f "$site/wp-includes/version.php" ]] || continue
+    [[ -f "$site/wp-includes/version.php" ]] || { mark_unsupported incomplete; continue; }
     actual="$(realpath -e -- "$site")" || { rm -f -- "$candidates"; return 1; }
-    [[ "$site" == "$actual" ]] || { ((unsupported_count += 1)); continue; }
+    [[ "$site" == "$actual" ]] || { mark_unsupported symlink; continue; }
     name="${site#"$root"/}"
     domain="${name%/public_html}"
     # Only standard layout $HOME/domains/<domain>/public_html is currently
     # supported by the original bulk updater; do not assume subdirectories.
-    if [[ "$name" != "$domain/public_html" || "$domain" == */* ||
-          ! "$domain" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}$ || "$domain" == *..* ]]; then
-      ((unsupported_count += 1))
+    if [[ "$name" != "$domain/public_html" || "$domain" == */* ]]; then
+      mark_unsupported nonstandard
+      continue
+    fi
+    if [[ ! "$domain" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}$ || "$domain" == *..* ]]; then
+      mark_unsupported invalid_domain
       continue
     fi
     site_paths+=("$site")
     site_domains+=("$domain")
     if ! "$wp_cli" --path="$site" --skip-plugins --skip-themes --no-color core is-installed >/dev/null 2>&1; then
-      ((unsupported_count += 1))
+      mark_unsupported core_unavailable
     elif "$wp_cli" --path="$site" --skip-plugins --skip-themes --no-color core is-installed --network >/dev/null 2>&1; then
       ((multisite_count += 1))
     else
       # The domain-folder name must actually be the WordPress home page.
       # Different hosts/paths are not certified by https://<folder>/.
       local home_url
-      home_url="$("$wp_cli" --path="$site" --skip-plugins --skip-themes --no-color option get home 2>/dev/null)" || home_url=""
-      case "$home_url" in
-        "http://$domain"|"http://$domain/"|"https://$domain"|"https://$domain/"|\
-        "http://www.$domain"|"http://www.$domain/"|"https://www.$domain"|"https://www.$domain/") : ;;
-        *) ((unsupported_count += 1)) ;;
-      esac
+      if ! home_url="$("$wp_cli" --path="$site" --skip-plugins --skip-themes --no-color option get home 2>/dev/null)"; then
+        mark_unsupported home_unavailable
+      else
+        case "$home_url" in
+          "http://$domain"|"http://$domain/"|"https://$domain"|"https://$domain/"|\
+          "http://www.$domain"|"http://www.$domain/"|"https://www.$domain"|"https://www.$domain/") : ;;
+          *) mark_unsupported home_mismatch ;;
+        esac
+      fi
     fi
   done < "$candidates"
   rm -f -- "$candidates"
@@ -85,7 +132,7 @@ discover_sites() {
   local link
   shopt -s nullglob
   for link in "$root"/*/public_html; do
-    if [[ -L "$link" || -L "${link%/public_html}" ]]; then ((unsupported_count += 1)); fi
+    if [[ -L "$link" || -L "${link%/public_html}" ]]; then mark_unsupported symlink; fi
   done
   shopt -u nullglob
   if [[ "${#site_paths[@]}" -eq 0 ]]; then return 1; fi
@@ -103,6 +150,7 @@ printf 'MAINT\tINVENTORY_SHA256\t%s\n' "$inventory_hash"
 printf 'MAINT\tWORDPRESS_COUNT\t%s\n' "$before_count"
 printf 'MAINT\tUNSUPPORTED_COUNT\t%s\n' "$unsupported_count"
 printf 'MAINT\tMULTISITE_COUNT\t%s\n' "$multisite_count"
+emit_diagnostics ''
 if (( unsupported_count > 0 || multisite_count > 0 )); then
   printf 'MAINT\tPRECHECK\tBLOCKED\n'
   exit 17
@@ -142,6 +190,7 @@ after_count=${#site_paths[@]}
 printf 'MAINT\tWORDPRESS_AFTER\t%s\n' "$after_count"
 printf 'MAINT\tUNSUPPORTED_AFTER\t%s\n' "$unsupported_count"
 printf 'MAINT\tMULTISITE_AFTER\t%s\n' "$multisite_count"
+emit_diagnostics _AFTER
 post_inventory_hash="$inventory_hash"
 cache_ok=0
 cache_failed=0
