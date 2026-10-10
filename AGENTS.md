@@ -17,8 +17,17 @@ This repository is transport, not a second controller.
 - `preview` and `deploy` operate only on explicit theme/plugin targets.
   Require a bounded payload, validated non-symlink paths, strict hostkeys,
   typed deploy confirmation and checksum readback.
-- No arbitrary shell inputs, SQL, automatic WordPress/WooCommerce updates,
-  cronjobs, scheduled actions, backup jobs or `rsync --delete`.
+- No arbitrary shell inputs, SQL, cronjobs, scheduled actions, backup jobs or
+  `rsync --delete`.
+- **Single scoped exception**: manual `wordpress-onderhoud-hostinger-1.yml`
+  may execute only the existing `$HOME/domains/update_wordpress.sh`, after
+  preflight and typed `UPDATE:hostinger-1:ALL` confirmation. Follow with
+  post-update WordPress, cache and public HTTPS checks; fail closed. The
+  original SSH/deploy workflow stays unchanged. Do not add recurring updates
+  or allow other environments until separately authorized.
+- The maintenance wrapper creates no backups. It cannot guarantee Hostinger
+  backups or the behavior of the independently maintained server script.
 - GitHub CI success is not a live SSH or WordPress website QA result.
-- Tests: `python3 -m unittest discover -s tests -v`.
+- Tests: `python3 -m unittest discover -s tests -v` and
+  `bash -n scripts/wordpress_maintenance_remote.sh`.
 - Validate: `python3 scripts/hostinger.py validate --config config/sites.example.json`.
