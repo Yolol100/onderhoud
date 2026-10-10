@@ -8,6 +8,29 @@ Open [WordPress bulkupdate - Hostinger 1](https://github.com/Yolol100/onderhoud/
 
 De preflight controleert SSH, het bestaan en de Bash-syntax van het vaste updatescript, het aantal herkenbare WordPress-installaties, databasebereikbaarheid, de standaard webroot-structuur, de WP-home-domeinen en multisite-detectie. Het bestaande script wordt **niet** gestart. Kopieer de twee SHA-256-waarden (script en inventaris) uit een **groene** preflight.
 
+Als de voorcontrole rood wordt met `WordPress-inventory needs manual review`,
+worden voortaan afzonderlijke, geanonimiseerde aantallen per oorzaakcategorie
+getoond onder `Diagnose:`. Er worden **geen namen, URL's of serverpaden** naar de
+openbare GitHub Actions-log geschreven. De categorieën betekenen:
+
+- **Afwijkende WordPress-mapstructuur:** WordPress staat bijvoorbeeld in een submap
+  of een andere webroot dan `domains/<domein>/public_html`.
+- **Ongeldige of afwijkende domeinmapnaam:** de mapnaam is geen herkenbaar domein.
+- **Symbolische link of afwijkend echt pad:** een webroot verwijst ergens anders heen.
+- **Onvolledige WordPress-bestanden:** `wp-load.php` bestaat, maar de verwachte
+  versiegegevens ontbreken.
+- **WordPress-database of WP-CLI niet bereikbaar:** `wp core is-installed` faalt.
+- **WordPress home-URL niet uitleesbaar:** de WP-CLI-opvraag faalt.
+- **WordPress home-URL wijkt af van domeinmap:** de ingestelde `home`-URL is
+  geen directe match met de mapnaam (kan een bewust domeinalias of subpad zijn).
+- **Multisite:** aparte teller; vereist een aparte WordPress-netwerkcontrole.
+
+**Een afwijking wordt niet automatisch genegeerd of hersteld.** De juiste
+vervolgstap hangt af van het *daadwerkelijke* WordPress-pad, de bedoelde domein-
+en aliasconfiguratie en van welke sites het bestaande updatescript beheert.
+Verander bijvoorbeeld nooit blind de `home`-URL en wijzig het batchscript niet
+zonder die scope te verifiëren. Start `update` niet zolang preflight rood is.
+
 **Belangrijk:** preflight bewijst niet wat het externe serverscript precies zal doen. Controleer de actuele scriptinhoud en de beschikbaarheid van een Hostinger-herstelpunt voordat een productie-update wordt vrijgegeven. Dit project maakt zelf geen back-ups; het garandeert ook geen herstel.
 
 ## Stap 2 — alle installaties bijwerken
