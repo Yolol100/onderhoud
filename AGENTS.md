@@ -23,6 +23,7 @@ This repository is transport, not a second controller.
   `main` pushes to audited script/workflow paths. It must use the existing
   fixed-purpose preflight only, the Hostinger-1 Environment, strict hostkeys,
   no domain names in logs, and cannot execute any update command.
+- Multi-account `hostinger-wordpress-migration-audit.yml` is read-only. Each job uses only its matching existing GitHub Environment secret. Verify Hostinger-2 exclusions against the pinned historical script SHA; do not upload private script contents or overwrite remote files. This is not update/deployment authorization.
 - **Single scoped exception**: manual `wordpress-onderhoud-hostinger-1.yml`
   may execute only the existing `$HOME/domains/update_wordpress.sh`, after
   preflight and typed `UPDATE:hostinger-1:ALL` confirmation. Follow with
