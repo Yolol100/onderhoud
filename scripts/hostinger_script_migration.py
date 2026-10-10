@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from hostinger import Blocked, require, ssh_options, validate_config
+from hostinger import Blocked, require, ssh_options, validate_config, account_fingerprint, verify_hosting_binding
 
 POLICY_FILE = Path(__file__).resolve().parents[1] / 'config/wordpress-migration-policy.json'
 FIELDS = ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION',
@@ -125,13 +125,6 @@ def parse_ssh_output(text):
     return result
 
 
-def account_fingerprint(config):
-    """Compare hosting account identities without publishing SSH hosts/users."""
-    account = validate_config(config)["account"]
-    parts = (account["user"], account["host"].lower(), str(account["port"]))
-    return hashlib.sha256("|".join(parts).encode("ascii")).hexdigest()
-
-
 def inspect(hosting, config, ssh_key, known_hosts):
     require(re.fullmatch(r'hostinger-(?:[1-9]|10)', hosting) is not None, 'Invalid hosting ID')
     account = validate_config(config)['account']
@@ -213,7 +206,7 @@ def main():
         require(bool(raw.strip()), 'Missing HOSTINGER_SITES_JSON')
         policy = load_policy()
         config = json.loads(raw)
-        fingerprint = account_fingerprint(config)
+        fingerprint = verify_hosting_binding(config, hosting)
         print("Account-identiteit SHA-256:", fingerprint)
         inventory, code = inspect(hosting, config,
                                   os.environ.get('HOSTINGER_SSH_PRIVATE_KEY', ''),
