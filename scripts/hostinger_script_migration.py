@@ -15,7 +15,7 @@ POLICY_FILE = Path(__file__).resolve().parents[1] / 'config/wordpress-migration-
 FIELDS = ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION',
           'DOMAINS_SCRIPT_SYNTAX', 'HOME_SCRIPT_SYNTAX', 'HOME_EXCLUSION_SYNTAX',
           'WP_CLI', 'DOMAIN_DIRS', 'DOMAIN_NAMES_SHA256', 'SCRIPT_CANDIDATES',
-          'MATCHING_EXCLUSION_FILES', 'SOURCE_ACCOUNT_SPECIFIC')
+          'MATCHING_EXCLUSION_FILES', 'CANDIDATE_TRUNCATED', 'SOURCE_ACCOUNT_SPECIFIC')
 DIGEST_FIELDS = {'DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION', 'DOMAIN_NAMES_SHA256'}
 ABSENT = '0' * 64
 REMOTE = r'''#!/usr/bin/env bash
@@ -50,21 +50,30 @@ count="$(find -P "$root" -mindepth 1 -maxdepth 1 -type d -print | wc -l | tr -d 
 printf 'SCRIPT_AUDIT\tDOMAIN_DIRS\t%s\n' "$count"
 name_sha="$(find -P "$root" -mindepth 1 -maxdepth 1 -type d -printf '%f\0' | LC_ALL=C sort -z | sha256sum | cut -d ' ' -f1)"
 printf 'SCRIPT_AUDIT\tDOMAIN_NAMES_SHA256\t%s\n' "$name_sha"
-# Search only named shell scripts outside public_html, never emit filenames.
+# Search only predictable script folders. Never descend into public_html.
+# This bounded inspection must not traverse or expose customer webroots.
 candidates=0
 matches=0
-while IFS= read -r -d '' candidate; do
-  ((candidates += 1))
-  ((candidates <= 150)) || exit 46
-  if [[ ! -L "$candidate" && -r "$candidate" ]]; then
-    digest="$(sha256sum -- "$candidate" | cut -d ' ' -f1)"
-    if [[ "$digest" == "$expected" ]]; then ((matches += 1)); fi
-  fi
-done < <(find -P "$HOME" -mindepth 1 -maxdepth 4 \
-  \( -type d \( -name public_html -o -name wp-content -o -name .git -o -name node_modules \) -prune \) -o \
-  \( -type f \( -iname '*wordpress*.sh' -o -iname '*update*.sh' \) -print0 \))
+truncated=0
+for base in "$HOME" "$HOME/domains" "$HOME/scripts" "$HOME/bin" "$HOME/tools"; do
+  [[ -d "$base" && ! -L "$base" ]] || continue
+  while IFS= read -r -d '' candidate; do
+    ((candidates += 1))
+    if ((candidates > 150)); then
+      truncated=1
+      break
+    fi
+    if [[ ! -L "$candidate" && -r "$candidate" ]]; then
+      digest="$(sha256sum -- "$candidate" | cut -d ' ' -f1)"
+      if [[ "$digest" == "$expected" ]]; then ((matches += 1)); fi
+    fi
+  done < <(find -P "$base" -mindepth 1 -maxdepth 1 -type f \
+    \( -iname '*wordpress*.sh' -o -iname '*update*.sh' \) -print0)
+  if ((truncated == 1)); then break; fi
+done
 printf 'SCRIPT_AUDIT\tSCRIPT_CANDIDATES\t%s\n' "$candidates"
 printf 'SCRIPT_AUDIT\tMATCHING_EXCLUSION_FILES\t%s\n' "$matches"
+printf 'SCRIPT_AUDIT\tCANDIDATE_TRUNCATED\t%s\n' "$truncated"
 specific=0
 if [[ -f "$root/update_wordpress.sh" && ! -L "$root/update_wordpress.sh" ]]; then
   if grep -Eq '/home/u[0-9]{4,16}' "$root/update_wordpress.sh"; then specific=1; fi
@@ -100,7 +109,8 @@ def parse_ssh_output(text):
         else:
             require(value.isascii() and value.isdecimal() and len(value) <= 6, 'Invalid count')
         result[field] = value
-    require(set(result) == set(FIELDS), 'Incomplete SSH audit response')
+    require(set(result) == set(FIELDS),
+            'Incomplete SSH audit response: ' + ','.join(sorted(set(FIELDS) - set(result))))
     return result
 
 
@@ -140,6 +150,7 @@ def evaluate(hosting, inventory, returncode, policy):
     print('Domein-inventaris fingerprint:', inventory['DOMAIN_NAMES_SHA256'])
     print('Update-scriptkandidaten buiten webroots:', inventory['SCRIPT_CANDIDATES'])
     print('Historische exclusieprofielmatches:', inventory['MATCHING_EXCLUSION_FILES'])
+    print('Scriptzoeklimiet bereikt:', 'JA' if inventory['CANDIDATE_TRUNCATED'] == '1' else 'NEE')
     if hosting == 'hostinger-1':
         print('Accountspecifieke absolute paden in bronscript:',
               'JA' if inventory['SOURCE_ACCOUNT_SPECIFIC'] == '1' else 'NEE')
@@ -156,6 +167,9 @@ def evaluate(hosting, inventory, returncode, policy):
     if any(inventory[k] != ABSENT and inventory[k + '_SYNTAX'] != '1'
            for k in ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION')):
         print('STATUS: BLOCKED — een bestaand script heeft ongeldige Bash-syntax')
+        return False
+    if inventory['CANDIDATE_TRUNCATED'] == '1':
+        print('STATUS: BLOCKED — zoekbereik niet volledig onderzocht')
         return False
     if returncode != 0:
         return False
