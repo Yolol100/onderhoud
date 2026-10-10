@@ -48,7 +48,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
             "permissions:\n  contents: read",
             "persist-credentials: false",
             "python3 scripts/hostinger.py connect",
-            'sha256 fingerprint: $fingerprint',
+            'SHA256 fingerprint: $fingerprint',
             "ssh-keygen -y -P '' -f",
             "secrets.HOSTINGER_SITES_JSON",
             "secrets.HOSTINGER_SSH_PRIVATE_KEY",
