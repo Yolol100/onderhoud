@@ -1,0 +1,74 @@
+name: Hostinger 5 - controle nieuwe SSH-sleutel (alleen lezen)
+
+# Exposes only the public-key fingerprint; never prints or exports a private key.
+# A change to this workflow on main starts the check exactly once.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger5-ssh-key-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-ssh-operations
+  cancel-in-progress: false
+
+jobs:
+  verify-hostinger-5:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: hostinger-5
+    steps:
+      - name: Checkout zonder bewaarde credentials
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Controleer accountidentiteit en syntaxis
+        shell: bash
+        env:
+          HOSTINGER_SITES_JSON: ${{ secrets.HOSTINGER_SITES_JSON }}
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/hostinger.py scripts/hostinger_script_migration.py
+          PYTHONPATH=scripts python3 - <<'PY'
+          import json
+          import os
+          from hostinger import require
+          from hostinger_script_migration import account_fingerprint
+          actual = account_fingerprint(json.loads(os.environ["HOSTINGER_SITES_JSON"]))
+          require(actual == "bc8c65dd7039c81c83d26c3b4232ba46b11cb73fb9b3110957bee66db287f0ba",
+                  "Hostinger 5 points to another SSH account: STOP")
+          print("Hostinger 5 SSH-accountidentiteit: OK (geen accountgegevens gelogd)")
+          PY
+      - name: Vergelijkbare publieke sleutelvingerafdruk uit Environment Secret
+        shell: bash
+        env:
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          temp="$(mktemp -d)"
+          trap 'rm -f -- "$temp/private" "$temp/public"; rmdir -- "$temp"' EXIT
+          test -n "$HOSTINGER_SSH_PRIVATE_KEY" || { echo "Missing SSH private key secret"; exit 1; }
+          printf '%s\n' "$HOSTINGER_SSH_PRIVATE_KEY" > "$temp/private"
+          ssh-keygen -y -P '' -f "$temp/private" > "$temp/public" 2>/dev/null || {
+            echo "Environment SSH private key invalid or password-protected"
+            exit 1
+          }
+          fingerprint="$(ssh-keygen -lf "$temp/public" -E sha256 | awk '{print $2}')"
+          [[ "$fingerprint" == SHA256:* ]] || exit 1
+          echo "Hostinger 5 Github public-key SHA256 fingerprint: $fingerprint"
+      - name: Echte SSH connect via Hostinger 5 secrets (read-only)
+        shell: bash
+        env:
+          HOSTINGER_SITES_JSON: ${{ secrets.HOSTINGER_SITES_JSON }}
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          python3 scripts/hostinger.py connect
