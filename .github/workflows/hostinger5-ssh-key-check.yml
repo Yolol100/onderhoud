@@ -71,7 +71,7 @@ jobs:
           HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          python3 scripts/hostinger.py connect
+          HOSTING_ENV=hostinger-5 python3 scripts/hostinger.py connect
       - name: Controleer defecte Bash-updater alleen op syntax (geen uitvoering)
         shell: bash
         env:
