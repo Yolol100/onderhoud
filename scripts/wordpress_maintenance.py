@@ -32,6 +32,13 @@ DIAG_REASONS = {
     "DIAG_HOME_MISMATCH": "WordPress home-URL wijkt af van domeinmap",
 }
 
+NESTED_SCOPE_FIELDS = {
+    "NESTED_INSIDE_PUBLIC": "WordPress-subinstallaties binnen een publieke webroot",
+    "NESTED_OUTSIDE_PUBLIC": "WordPress-installaties buiten de publieke webroot",
+    "NESTED_DB_INSTALLED": "Afwijkende installaties met bereikbare WordPress-database",
+    "NESTED_DB_UNAVAILABLE": "Afwijkende installaties zonder bereikbare WordPress-database",
+}
+
 EXPECTED_TAGS = {
     "SCRIPT_SHA256", "WORDPRESS_COUNT", "PRECHECK", "UPDATE_EXIT",
     "INVENTORY_SHA256", "WORDPRESS_AFTER", "SITE", "CACHE_OK", "CACHE_FAILED",
@@ -39,6 +46,7 @@ EXPECTED_TAGS = {
     "INVENTORY_AFTER_SHA256", "UNSUPPORTED_COUNT", "MULTISITE_COUNT",
     "ERROR_SIGNATURES", "UNSUPPORTED_AFTER", "MULTISITE_AFTER",
     *DIAG_REASONS, *(key + "_AFTER" for key in DIAG_REASONS),
+    *NESTED_SCOPE_FIELDS, *(key + "_AFTER" for key in NESTED_SCOPE_FIELDS),
 }
 FATAL_MARKERS = (
     b"fatal error:", b"error establishing a database connection",
@@ -89,7 +97,7 @@ def parse_remote_output(output: str) -> dict:
             parsed[key] = value
     require(all(k in parsed for k in ("SCRIPT_SHA256", "INVENTORY_SHA256", "WORDPRESS_COUNT",
                                       "UNSUPPORTED_COUNT", "MULTISITE_COUNT", "PRECHECK",
-                                      *DIAG_REASONS)),
+                                      *DIAG_REASONS, *NESTED_SCOPE_FIELDS)),
             "Missing mandatory preflight results")
     return parsed
 
@@ -158,6 +166,13 @@ def evaluate(action: str, result: dict, ssh_rc: int,
             print(f"Diagnose: {description}: {value}")
     require(sum(result[key] for key in DIAG_REASONS) == unsupported,
             "Inventory diagnostics incomplete or inconsistent")
+    nested = result["DIAG_NONSTANDARD"]
+    require(result["NESTED_INSIDE_PUBLIC"] + result["NESTED_OUTSIDE_PUBLIC"] == nested
+            and result["NESTED_DB_INSTALLED"] + result["NESTED_DB_UNAVAILABLE"] == nested,
+            "Nonstandard WordPress scope diagnostics inconsistent")
+    if nested:
+        for key, description in NESTED_SCOPE_FIELDS.items():
+            print(f"Scope: {description}: {result[key]}")
     require(unsupported == 0 and multisite == 0, "WordPress-inventory needs manual review")
     require(result["PRECHECK"] == "OK", "Remote preflight mismatch or blocked")
     if action == "preflight":
@@ -171,10 +186,16 @@ def evaluate(action: str, result: dict, ssh_rc: int,
     keys = ("UPDATE_EXIT", "WORDPRESS_AFTER", "CACHE_OK", "CACHE_FAILED",
             "WP_OK", "WP_FAILED", "CHECK_FAILED", "PENDING_UPDATES",
             "ERROR_SIGNATURES", "INVENTORY_AFTER_SHA256", "UNSUPPORTED_AFTER", "MULTISITE_AFTER")
-    require(all(key in result for key in (*keys, *(key + "_AFTER" for key in DIAG_REASONS))),
+    require(all(key in result for key in (*keys,
+                *(key + "_AFTER" for key in DIAG_REASONS),
+                *(key + "_AFTER" for key in NESTED_SCOPE_FIELDS))),
             "Missing mandatory post-update results")
     require(sum(result[key + "_AFTER"] for key in DIAG_REASONS) == result["UNSUPPORTED_AFTER"],
             "Post-update inventory diagnostics incomplete")
+    nested_after = result["DIAG_NONSTANDARD_AFTER"]
+    require(result["NESTED_INSIDE_PUBLIC_AFTER"] + result["NESTED_OUTSIDE_PUBLIC_AFTER"] == nested_after
+            and result["NESTED_DB_INSTALLED_AFTER"] + result["NESTED_DB_UNAVAILABLE_AFTER"] == nested_after,
+            "Post-update nonstandard scope diagnostics inconsistent")
     domains = result["SITE"]
     expected = result["WORDPRESS_AFTER"]
     require(expected == len(domains), "Incomplete website inventory after update")
