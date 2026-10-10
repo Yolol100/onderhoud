@@ -12,22 +12,29 @@ import tempfile
 from hostinger import Blocked, require, ssh_options, validate_config
 
 POLICY_FILE = Path(__file__).resolve().parents[1] / 'config/wordpress-migration-policy.json'
-FIELDS = ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION', 'WP_CLI', 'DOMAIN_DIRS')
+FIELDS = ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION',
+          'DOMAINS_SCRIPT_SYNTAX', 'HOME_SCRIPT_SYNTAX', 'HOME_EXCLUSION_SYNTAX',
+          'WP_CLI', 'DOMAIN_DIRS', 'DOMAIN_NAMES_SHA256', 'SCRIPT_CANDIDATES',
+          'MATCHING_EXCLUSION_FILES', 'SOURCE_ACCOUNT_SPECIFIC')
+DIGEST_FIELDS = {'DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION', 'DOMAIN_NAMES_SHA256'}
 ABSENT = '0' * 64
 REMOTE = r'''#!/usr/bin/env bash
 set -euo pipefail
 root="$HOME/domains"
+expected="$1"
 [[ -d "$root" && ! -L "$root" ]] || exit 41
 command -v sha256sum >/dev/null
 hash_script() {
-  local file="$1" label="$2" digest
+  local file="$1" label="$2" digest syntax
   if [[ -e "$file" || -L "$file" ]]; then
     [[ -f "$file" && ! -L "$file" && -r "$file" ]] || exit 42
-    bash -n -- "$file" >/dev/null 2>&1 || exit 43
+    if bash -n -- "$file" >/dev/null 2>&1; then syntax=1; else syntax=0; fi
     digest="$(sha256sum -- "$file" | cut -d ' ' -f 1)"
     printf 'SCRIPT_AUDIT\t%s\t%s\n' "$label" "$digest"
+    printf 'SCRIPT_AUDIT\t%s_SYNTAX\t%s\n' "$label" "$syntax"
   else
     printf 'SCRIPT_AUDIT\t%s\t0000000000000000000000000000000000000000000000000000000000000000\n' "$label"
+    printf 'SCRIPT_AUDIT\t%s_SYNTAX\t0\n' "$label"
   fi
 }
 hash_script "$root/update_wordpress.sh" DOMAINS_SCRIPT
@@ -41,6 +48,28 @@ fi
 count="$(find -P "$root" -mindepth 1 -maxdepth 1 -type d -print | wc -l | tr -d '[:space:]')"
 [[ "$count" =~ ^[0-9]+$ ]] || exit 45
 printf 'SCRIPT_AUDIT\tDOMAIN_DIRS\t%s\n' "$count"
+name_sha="$(find -P "$root" -mindepth 1 -maxdepth 1 -type d -printf '%f\0' | LC_ALL=C sort -z | sha256sum | cut -d ' ' -f1)"
+printf 'SCRIPT_AUDIT\tDOMAIN_NAMES_SHA256\t%s\n' "$name_sha"
+# Search only named shell scripts outside public_html, never emit filenames.
+candidates=0
+matches=0
+while IFS= read -r -d '' candidate; do
+  ((candidates += 1))
+  ((candidates <= 150)) || exit 46
+  if [[ ! -L "$candidate" && -r "$candidate" ]]; then
+    digest="$(sha256sum -- "$candidate" | cut -d ' ' -f1)"
+    if [[ "$digest" == "$expected" ]]; then ((matches += 1)); fi
+  fi
+done < <(find -P "$HOME" -mindepth 1 -maxdepth 4 \
+  \( -type d \( -name public_html -o -name wp-content -o -name .git -o -name node_modules \) -prune \) -o \
+  \( -type f \( -iname '*wordpress*.sh' -o -iname '*update*.sh' \) -print0 \))
+printf 'SCRIPT_AUDIT\tSCRIPT_CANDIDATES\t%s\n' "$candidates"
+printf 'SCRIPT_AUDIT\tMATCHING_EXCLUSION_FILES\t%s\n' "$matches"
+specific=0
+if [[ -f "$root/update_wordpress.sh" && ! -L "$root/update_wordpress.sh" ]]; then
+  if grep -Eq '/home/u[0-9]{4,16}' "$root/update_wordpress.sh"; then specific=1; fi
+fi
+printf 'SCRIPT_AUDIT\tSOURCE_ACCOUNT_SPECIFIC\t%s\n' "$specific"
 '''
 
 
@@ -66,7 +95,7 @@ def parse_ssh_output(text):
         require(len(parts) == 3 and parts[0] == 'SCRIPT_AUDIT', 'Unexpected SSH response')
         _, field, value = parts
         require(field in FIELDS and field not in result, 'Invalid/duplicate SSH field')
-        if field in FIELDS[:3]:
+        if field in DIGEST_FIELDS:
             require(re.fullmatch(r'[0-9a-f]{64}', value) is not None, 'Invalid digest')
         else:
             require(value.isascii() and value.isdecimal() and len(value) <= 6, 'Invalid count')
@@ -90,7 +119,8 @@ def inspect(hosting, config, ssh_key, known_hosts):
         hosts.write_text(known_hosts.rstrip('\n') + '\n', encoding='utf-8')
         os.chmod(key, 0o600)
         os.chmod(hosts, 0o600)
-        args = ssh_options(account, key, hosts) + [f"{account['user']}@{account['host']}", 'bash -s --']
+        expected = load_policy()['hostinger-2']['legacy_sha256'] if hosting == 'hostinger-2' else ABSENT
+        args = ssh_options(account, key, hosts) + [f"{account['user']}@{account['host']}", 'bash -s -- ' + expected]
         try:
             run = subprocess.run(args, input=REMOTE, text=True, capture_output=True, timeout=180, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -101,16 +131,32 @@ def inspect(hosting, config, ssh_key, known_hosts):
 
 def evaluate(hosting, inventory, returncode, policy):
     print('Hosting environment:', hosting)
-    for key in FIELDS[:3]:
-        print(f'{key}:', 'afwezig' if inventory[key] == ABSENT else 'SHA-256 ' + inventory[key])
+    for key in ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION'):
+        value = inventory[key]
+        syntax = inventory[key + '_SYNTAX']
+        print(f'{key}:', 'afwezig' if value == ABSENT else 'SHA-256 ' + value,
+              '(Bash syntax OK)' if syntax == '1' else '(ontbreekt of Bash syntax fout)')
     print('Domeinmappen:', inventory['DOMAIN_DIRS'])
+    print('Domein-inventaris fingerprint:', inventory['DOMAIN_NAMES_SHA256'])
+    print('Update-scriptkandidaten buiten webroots:', inventory['SCRIPT_CANDIDATES'])
+    print('Historische exclusieprofielmatches:', inventory['MATCHING_EXCLUSION_FILES'])
+    if hosting == 'hostinger-1':
+        print('Accountspecifieke absolute paden in bronscript:',
+              'JA' if inventory['SOURCE_ACCOUNT_SPECIFIC'] == '1' else 'NEE')
     print('WP-CLI:', 'gevonden' if inventory['WP_CLI'] == '1' else 'ontbreekt')
     if hosting == 'hostinger-2':
-        same = inventory['HOME_EXCLUSION'] == policy['hostinger-2']['legacy_sha256']
-        print('Oud exclusieprofiel exact overeenkomstig:', 'JA' if same else 'NEE')
+        same = (inventory['HOME_EXCLUSION'] == policy['hostinger-2']['legacy_sha256']
+                or int(inventory['MATCHING_EXCLUSION_FILES']) > 0)
+        print('Historisch exclusieprofiel ergens buiten webroot gevonden:',
+              'JA' if same else 'NEE')
+        print('Dit bevestigt niet dat de huidige actieve updater dezelfde uitsluitingen heeft.')
         print('Hostinger 2: zes historische uitsluitingen moeten behouden blijven')
         if not same:
             return False
+    if any(inventory[k] != ABSENT and inventory[k + '_SYNTAX'] != '1'
+           for k in ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION')):
+        print('STATUS: BLOCKED — een bestaand script heeft ongeldige Bash-syntax')
+        return False
     if returncode != 0:
         return False
     if hosting == 'hostinger-1' and inventory['DOMAINS_SCRIPT'] == ABSENT:

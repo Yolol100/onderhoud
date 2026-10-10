@@ -45,7 +45,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
                 migration.load_policy(p)
 
     def test_parse_requires_exact_structure_and_counts(self):
-        data = {key: migration.ABSENT if key in migration.FIELDS[:3] else "1"
+        data = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "SOURCE_ACCOUNT_SPECIFIC") else "1")
                 for key in migration.FIELDS}
         valid = "".join(f"SCRIPT_AUDIT\t{k}\t{v}\n" for k, v in data.items())
         self.assertEqual(migration.parse_ssh_output(valid), data)
@@ -62,16 +62,16 @@ class HostingerScriptMigrationTests(unittest.TestCase):
                     migration.parse_ssh_output(broken)
 
     def test_hostinger2_wrong_checksum_blocks_migration(self):
-        inventory = {key: migration.ABSENT if key in migration.FIELDS[:3] else "1"
+        inventory = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "SOURCE_ACCOUNT_SPECIFIC") else "1")
                      for key in migration.FIELDS}
         with contextlib.redirect_stdout(io.StringIO()) as log:
             self.assertFalse(migration.evaluate(
                 "hostinger-2", inventory, 0, migration.load_policy()))
-        self.assertIn("exclusieprofiel exact overeenkomstig: NEE", log.getvalue())
+        self.assertIn("Historisch exclusieprofiel ergens buiten webroot gevonden: NEE", log.getvalue())
         self.assertNotIn("cf7-conditional-fields", log.getvalue())
 
     def test_hostinger2_matching_checksum_allows_audit_only(self):
-        inventory = {key: migration.ABSENT if key in migration.FIELDS[:3] else "1"
+        inventory = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "SOURCE_ACCOUNT_SPECIFIC") else "1")
                      for key in migration.FIELDS}
         inventory["HOME_EXCLUSION"] = ARCHIVE_DIGEST
         with contextlib.redirect_stdout(io.StringIO()) as log:
@@ -89,7 +89,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
             script.write_text("#!/usr/bin/env bash\necho 'PRIVATE DOMAIN: example.com'\n")
             legacy.write_text("#!/usr/bin/env bash\nprintf 'excluded plugin data'\n")
             original1, original2 = script.read_bytes(), legacy.read_bytes()
-            p = subprocess.run(["bash", "-s", "--"], input=migration.REMOTE,
+            p = subprocess.run(["bash", "-s", "--", migration.ABSENT], input=migration.REMOTE,
                                text=True, capture_output=True, timeout=10,
                                env={**os.environ, "HOME": tmp})
             self.assertEqual(p.returncode, 0, p.stderr)
@@ -106,10 +106,64 @@ class HostingerScriptMigrationTests(unittest.TestCase):
             root = Path(tmp) / "domains"
             root.mkdir()
             (root / "update_wordpress.sh").symlink_to("/etc/passwd")
-            p = subprocess.run(["bash", "-s", "--"], input=migration.REMOTE,
+            p = subprocess.run(["bash", "-s", "--", migration.ABSENT], input=migration.REMOTE,
                                text=True, capture_output=True, timeout=10,
                                env={**os.environ, "HOME": tmp})
             self.assertNotEqual(p.returncode, 0)
+
+    def test_invalid_bash_script_is_diagnosed_without_running_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "domains"
+            root.mkdir()
+            path = root / "update_wordpress.sh"
+            path.write_text("#!/usr/bin/env bash\nif then\n")
+            p = subprocess.run(["bash", "-s", "--", migration.ABSENT], input=migration.REMOTE,
+                               text=True, capture_output=True, timeout=10,
+                               env={**os.environ, "HOME": tmp})
+            self.assertEqual(p.returncode, 0, p.stderr)
+            result = migration.parse_ssh_output(p.stdout)
+            self.assertEqual(result["DOMAINS_SCRIPT_SYNTAX"], "0")
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                self.assertFalse(migration.evaluate("hostinger-5", result, p.returncode,
+                                                    migration.load_policy()))
+            self.assertIn("ongeldige Bash-syntax", log.getvalue())
+
+    def test_legacy_exclusion_found_outside_expected_location(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "domains").mkdir()
+            folder = home / "tools"
+            folder.mkdir()
+            old = folder / "wordpress_legacy.sh"
+            old.write_text("#!/usr/bin/env bash\nprintf 'OLD PRIVATE EXCLUSION'\n")
+            expected = hashlib.sha256(old.read_bytes()).hexdigest()
+            p = subprocess.run(["bash", "-s", "--", expected], input=migration.REMOTE,
+                               text=True, capture_output=True, timeout=10,
+                               env={**os.environ, "HOME": tmp})
+            self.assertEqual(p.returncode, 0, p.stderr)
+            parsed = migration.parse_ssh_output(p.stdout)
+            self.assertEqual(parsed["MATCHING_EXCLUSION_FILES"], "1")
+            self.assertNotIn(str(folder), p.stdout)
+            self.assertNotIn("PRIVATE EXCLUSION", p.stdout)
+
+    def test_domain_names_fingerprint_without_disclosure(self):
+        digests = []
+        for names in (("one.example", "two.example"), ("one.example", "two.example"),
+                      ("one.example", "three.example")):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "domains"
+                root.mkdir()
+                for name in names:
+                    (root / name).mkdir()
+                p = subprocess.run(["bash", "-s", "--", migration.ABSENT],
+                                   input=migration.REMOTE, text=True, capture_output=True,
+                                   env={**os.environ, "HOME": tmp}, timeout=10)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                parsed = migration.parse_ssh_output(p.stdout)
+                digests.append(parsed["DOMAIN_NAMES_SHA256"])
+                self.assertNotIn("one.example", p.stdout)
+        self.assertEqual(digests[0], digests[1])
+        self.assertNotEqual(digests[0], digests[2])
 
     def test_new_workflow_never_runs_updater_or_writes(self):
         workflow = (ROOT / ".github/workflows/hostinger-wordpress-migration-audit.yml").read_text()
