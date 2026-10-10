@@ -1,0 +1,51 @@
+name: WordPress scriptmigratie - veilige SSH-inventaris
+
+# Elke geselecteerde omgeving heeft een eigen bestaande Environment/SSH secret.
+# Dit proces leest alleen scriptmetadata; geen deployment en geen update.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger-wordpress-migration-audit.yml'
+      - 'scripts/hostinger_script_migration.py'
+      - 'config/wordpress-migration-policy.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-ssh-operations
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        hosting: [hostinger-1, hostinger-2, hostinger-3, hostinger-4, hostinger-5, hostinger-6]
+    environment:
+      name: ${{ matrix.hosting }}
+    steps:
+      - name: Checkout van main, zonder bewaarde credentials
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Read-only lint en regressietests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/hostinger.py scripts/hostinger_script_migration.py
+          python3 -m unittest discover -s tests -q
+      - name: Lees alleen bestaande script-hashes en de Hostinger 2-uitzonderingen
+        env:
+          HOSTING_ENV: ${{ matrix.hosting }}
+          HOSTINGER_SITES_JSON: ${{ secrets.HOSTINGER_SITES_JSON }}
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          python3 scripts/hostinger_script_migration.py

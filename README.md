@@ -16,6 +16,7 @@ De GitHub Actions-keuzelijst gebruikt consequent `hostinger-1` tot en met
   bij relevante pushes naar `main`, met uitsluitend anonieme telwaarden.
   Een rode run betekent dat de WordPress-installaties nog beoordeeld moeten
   worden; er wordt niet bijgewerkt.
+- **WordPress-scriptmigratie**: gefaseerde SSH-inventaris voor de zes historisch bevestigde hostingaccounts; controleert ook het oude Hostinger 2-exclusieprofiel. Dit is alleen-lezen: er worden nog geen scripts gekopieerd. Zie [Migratieplan](docs/WORDPRESS-MIGRATIE-HOSTING.md).
 - **WordPress bulkupdate - Hostinger 1**: aparte, uitsluitend handmatige
   onderhoudsworkflow voor het bestaande `$HOME/domains/update_wordpress.sh`,
   gevolgd door cache- en basiswebsitecontroles. Lees eerst

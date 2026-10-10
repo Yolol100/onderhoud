@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hostinger-2": {
+    "legacy_sha256": "86b104f5107e2a69e70377b99328014d1e2401c7dca9c28ff3553aff211ac13f",
+    "excluded_plugins": [
+      "cf7-conditional-fields",
+      "cf7-multi-step",
+      "contact-form-7",
+      "drag-and-drop-multiple-file-upload-contact-form-7",
+      "open-rdw-kenteken-voertuiginformatie",
+      "wpcf7-redirect"
+    ]
+  }
+}

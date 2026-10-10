@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - name: Python, Bash syntax en alle unit tests
         run: |
-          python3 -m py_compile scripts/hostinger.py scripts/wordpress_maintenance.py tests/test_hostinger.py tests/test_wordpress_maintenance.py
+          python3 -m py_compile scripts/hostinger.py scripts/wordpress_maintenance.py scripts/hostinger_script_migration.py tests/test_hostinger.py tests/test_wordpress_maintenance.py tests/test_hostinger_script_migration.py
           bash -n scripts/wordpress_maintenance_remote.sh
           python3 -m unittest discover -s tests -v
           python3 scripts/hostinger.py validate --config config/sites.example.json
