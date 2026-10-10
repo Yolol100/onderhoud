@@ -27,7 +27,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        hosting: [hostinger-1, hostinger-2, hostinger-3, hostinger-4, hostinger-5, hostinger-6]
+        hosting: [hostinger-1, hostinger-2, hostinger-3, hostinger-4, hostinger-5, hostinger-6, hostinger-7]
     environment:
       name: ${{ matrix.hosting }}
     steps:
