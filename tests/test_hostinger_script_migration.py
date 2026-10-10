@@ -165,6 +165,40 @@ class HostingerScriptMigrationTests(unittest.TestCase):
         self.assertEqual(digests[0], digests[1])
         self.assertNotEqual(digests[0], digests[2])
 
+    def test_script_finder_never_descends_into_public_html(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "domains"
+            webroot = root / "site.example/public_html"
+            webroot.mkdir(parents=True)
+            for i in range(175):
+                (webroot / f"update_script_{i}.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+            p = subprocess.run(["bash", "-s", "--", migration.ABSENT],
+                               input=migration.REMOTE, text=True, capture_output=True,
+                               timeout=10, env={**os.environ, "HOME": tmp})
+            self.assertEqual(p.returncode, 0, p.stderr)
+            result = migration.parse_ssh_output(p.stdout)
+            self.assertEqual(result["SCRIPT_CANDIDATES"], "0")
+            self.assertEqual(result["CANDIDATE_TRUNCATED"], "0")
+
+    def test_too_many_script_candidates_are_reported_not_hidden(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "domains"
+            root.mkdir()
+            scripts = Path(tmp) / "tools"
+            scripts.mkdir()
+            for i in range(152):
+                (scripts / f"wordpress_update_{i}.sh").write_text("#!/usr/bin/env bash\n")
+            p = subprocess.run(["bash", "-s", "--", migration.ABSENT],
+                               input=migration.REMOTE, text=True, capture_output=True,
+                               timeout=10, env={**os.environ, "HOME": tmp})
+            self.assertEqual(p.returncode, 0, p.stderr)
+            result = migration.parse_ssh_output(p.stdout)
+            self.assertEqual(result["CANDIDATE_TRUNCATED"], "1")
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                self.assertFalse(migration.evaluate("hostinger-3", result, p.returncode,
+                                                    migration.load_policy()))
+            self.assertIn("zoekbereik niet volledig", log.getvalue())
+
     def test_new_workflow_never_runs_updater_or_writes(self):
         workflow = (ROOT / ".github/workflows/hostinger-wordpress-migration-audit.yml").read_text()
         for required in ("  push:", "workflow_dispatch:", "branches: [main]",
