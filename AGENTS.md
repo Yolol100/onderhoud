@@ -19,6 +19,10 @@ This repository is transport, not a second controller.
   typed deploy confirmation and checksum readback.
 - No arbitrary shell inputs, SQL, cronjobs, scheduled actions, backup jobs or
   `rsync --delete`.
+- Read-only `hostinger1-ssh-preflight.yml` may trigger automatically on
+  `main` pushes to audited script/workflow paths. It must use the existing
+  fixed-purpose preflight only, the Hostinger-1 Environment, strict hostkeys,
+  no domain names in logs, and cannot execute any update command.
 - **Single scoped exception**: manual `wordpress-onderhoud-hostinger-1.yml`
   may execute only the existing `$HOME/domains/update_wordpress.sh`, after
   preflight and typed `UPDATE:hostinger-1:ALL` confirmation. Follow with

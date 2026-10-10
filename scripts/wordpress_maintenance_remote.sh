@@ -39,6 +39,12 @@ diag_incomplete=0
 diag_core_unavailable=0
 diag_home_unavailable=0
 diag_home_mismatch=0
+# Read-only, public-log-safe classifications of nonstandard installations.
+# These fields are diagnostic only and never permit skipping a WP installation.
+nested_inside_public=0
+nested_outside_public=0
+nested_db_installed=0
+nested_db_unavailable=0
 inventory_hash=""
 mark_unsupported() {
   local reason="$1"
@@ -63,6 +69,10 @@ emit_diagnostics() {
   printf 'MAINT\tDIAG_CORE_UNAVAILABLE%s\t%s\n' "$suffix" "$diag_core_unavailable"
   printf 'MAINT\tDIAG_HOME_UNAVAILABLE%s\t%s\n' "$suffix" "$diag_home_unavailable"
   printf 'MAINT\tDIAG_HOME_MISMATCH%s\t%s\n' "$suffix" "$diag_home_mismatch"
+  printf 'MAINT\tNESTED_INSIDE_PUBLIC%s\t%s\n' "$suffix" "$nested_inside_public"
+  printf 'MAINT\tNESTED_OUTSIDE_PUBLIC%s\t%s\n' "$suffix" "$nested_outside_public"
+  printf 'MAINT\tNESTED_DB_INSTALLED%s\t%s\n' "$suffix" "$nested_db_installed"
+  printf 'MAINT\tNESTED_DB_UNAVAILABLE%s\t%s\n' "$suffix" "$nested_db_unavailable"
 }
 
 discover_sites() {
@@ -77,6 +87,10 @@ discover_sites() {
   diag_core_unavailable=0
   diag_home_unavailable=0
   diag_home_mismatch=0
+  nested_inside_public=0
+  nested_outside_public=0
+  nested_db_installed=0
+  nested_db_unavailable=0
   local candidates file site domain name actual
   candidates="$(mktemp)" || return 1
   if ! find -P "$root" -mindepth 2 \
@@ -99,6 +113,18 @@ discover_sites() {
     # Only standard layout $HOME/domains/<domain>/public_html is currently
     # supported by the original bulk updater; do not assume subdirectories.
     if [[ "$name" != "$domain/public_html" || "$domain" == */* ]]; then
+      # No domains, paths, or WordPress configuration ever leave the server.
+      # A nonstandard root can be a live site, so it still blocks UPDATE.
+      if [[ "$name" == */public_html/* ]]; then
+        ((nested_inside_public += 1))
+      else
+        ((nested_outside_public += 1))
+      fi
+      if "$wp_cli" --path="$site" --skip-plugins --skip-themes --no-color core is-installed >/dev/null 2>&1; then
+        ((nested_db_installed += 1))
+      else
+        ((nested_db_unavailable += 1))
+      fi
       mark_unsupported nonstandard
       continue
     fi

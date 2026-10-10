@@ -24,12 +24,14 @@ DIGEST = "a" * 64
 INV_DIGEST = "b" * 64
 DIAG_FIELDS = "".join(f"MAINT\t{key}\t0\n" for key in m.DIAG_REASONS)
 DIAG_FIELDS_AFTER = "".join(f"MAINT\t{key}_AFTER\t0\n" for key in m.DIAG_REASONS)
+SCOPE_FIELDS = "".join(f"MAINT\t{key}\t0\n" for key in m.NESTED_SCOPE_FIELDS)
+SCOPE_FIELDS_AFTER = "".join(f"MAINT\t{key}_AFTER\t0\n" for key in m.NESTED_SCOPE_FIELDS)
 PREFLIGHT = (f"MAINT\tSCRIPT_SHA256\t{DIGEST}\nMAINT\tINVENTORY_SHA256\t{INV_DIGEST}\n"
              "MAINT\tWORDPRESS_COUNT\t1\nMAINT\tUNSUPPORTED_COUNT\t0\n"
-             "MAINT\tMULTISITE_COUNT\t0\n" + DIAG_FIELDS + "MAINT\tPRECHECK\tOK\n")
+             "MAINT\tMULTISITE_COUNT\t0\n" + DIAG_FIELDS + SCOPE_FIELDS + "MAINT\tPRECHECK\tOK\n")
 UPDATE = (PREFLIGHT + "MAINT\tUPDATE_EXIT\t0\nMAINT\tWORDPRESS_AFTER\t1\n"
           "MAINT\tSITE\texample.com\nMAINT\tERROR_SIGNATURES\t0\n"
-          "MAINT\tUNSUPPORTED_AFTER\t0\nMAINT\tMULTISITE_AFTER\t0\n" + DIAG_FIELDS_AFTER +
+          "MAINT\tUNSUPPORTED_AFTER\t0\nMAINT\tMULTISITE_AFTER\t0\n" + DIAG_FIELDS_AFTER + SCOPE_FIELDS_AFTER +
           "MAINT\tCACHE_OK\t1\nMAINT\tCACHE_FAILED\t0\nMAINT\tWP_OK\t1\n"
           "MAINT\tWP_FAILED\t0\nMAINT\tCHECK_FAILED\t0\n"
           f"MAINT\tPENDING_UPDATES\t0\nMAINT\tINVENTORY_AFTER_SHA256\t{INV_DIGEST}\n")
@@ -77,6 +79,15 @@ class RequestGuards(unittest.TestCase):
             with self.subTest(field=field):
                 with self.assertRaises(m.Blocked):
                     m.evaluate("preflight", result, 0)
+
+    def test_scope_breakdown_must_match_nonstandard_count(self):
+        parsed = m.parse_remote_output(PREFLIGHT)
+        parsed["NESTED_INSIDE_PUBLIC"] = 1
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(m.Blocked):
+                m.evaluate("preflight", parsed, 17)
+        with self.assertRaises(m.Blocked):
+            m.parse_remote_output(PREFLIGHT.replace("MAINT\tNESTED_DB_INSTALLED\t0\n", ""))
 
     def test_success_does_not_leak_private_domain(self):
         with patch.object(m, "public_healthcheck", return_value=True):
@@ -261,6 +272,40 @@ exit 0
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("MAINT\tPRECHECK\tMISMATCH", r.stdout)
 
+    def test_nonstandard_roots_are_classified_without_customer_names(self):
+        # Live-equivalent shape: 30 standard installations, 3 nonstandard.
+        for i in range(29):
+            self.mk_site(f"normal{i}.example", "public_html")
+        self.mk_site("embedded.example", "public_html/blog")
+        self.mk_site("staging.example", "staging/public_html")
+        self.mk_site("archived.example", "archived/public_html")
+        run, result = self.preflight()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(result["WORDPRESS_COUNT"], "30")
+        self.assertEqual(result["DIAG_NONSTANDARD"], "3")
+        self.assertEqual(result["NESTED_INSIDE_PUBLIC"], "1")
+        self.assertEqual(result["NESTED_OUTSIDE_PUBLIC"], "2")
+        self.assertEqual(result["NESTED_DB_INSTALLED"], "3")
+        self.assertEqual(result["NESTED_DB_UNAVAILABLE"], "0")
+        for name in ("normal0.example", "embedded.example", "staging.example", "archived.example"):
+            self.assertNotIn(name, run.stdout)
+        with contextlib.redirect_stdout(io.StringIO()) as public_log:
+            with self.assertRaises(m.Blocked):
+                m.evaluate("preflight", m.parse_remote_output(run.stdout), run.returncode)
+        public = public_log.getvalue()
+        self.assertIn("Scope: WordPress-subinstallaties binnen een publieke webroot: 1", public)
+        self.assertIn("Scope: WordPress-installaties buiten de publieke webroot: 2", public)
+        self.assertNotIn("embedded.example", public)
+
+    def test_nested_db_unavailable_is_reported_but_not_excluded(self):
+        self.mk_site("staging.example", "staging/public_html")
+        run, result = self.preflight(CORE_FAIL="1")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(result["NESTED_OUTSIDE_PUBLIC"], "1")
+        self.assertEqual(result["NESTED_DB_UNAVAILABLE"], "1")
+        self.assertEqual(result["NESTED_DB_INSTALLED"], "0")
+        self.assertEqual(result["DIAG_NONSTANDARD"], "1")
+
     def test_unrecognised_nested_wordpress_blocks_preflight(self):
         self.mk_site("second.com", "public_html/blog")
         r, info = self.preflight()
@@ -425,6 +470,20 @@ class ActionTests(unittest.TestCase):
             self.assertNotIn(forbidden, text)
         for secret in ("HOSTINGER_SITES_JSON", "HOSTINGER_SSH_PRIVATE_KEY", "HOSTINGER_SSH_KNOWN_HOSTS"):
             self.assertIn("secrets." + secret, text)
+
+    def test_automatic_ssh_preflight_is_read_only(self):
+        source = (ROOT / ".github/workflows/hostinger1-ssh-preflight.yml").read_text()
+        for expected in ("  push:", "branches: [main]", "workflow_dispatch:",
+                         "name: hostinger-1", "group: hostinger-ssh-operations",
+                         "python3 scripts/wordpress_maintenance.py preflight",
+                         "permissions:\n  contents: read", "persist-credentials: false"):
+            self.assertIn(expected, source)
+        for forbidden in ("python3 scripts/wordpress_maintenance.py update",
+                          "UPDATE:hostinger-1:ALL", "StrictHostKeyChecking=no", "inputs.confirm"):
+            self.assertNotIn(forbidden, source)
+        for secret in ("HOSTINGER_SITES_JSON", "HOSTINGER_SSH_PRIVATE_KEY",
+                       "HOSTINGER_SSH_KNOWN_HOSTS"):
+            self.assertIn("secrets." + secret, source)
 
     def test_legacy_transport_unaffected(self):
         text = (ROOT / ".github/workflows/hostinger.yml").read_text()

@@ -2,6 +2,12 @@
 
 Deze GitHub Actions-workflow gebruikt **alleen** de bestaande Hostinger-1 Environment-secrets en het al aanwezige script `$HOME/domains/update_wordpress.sh`. De algemene `hostinger.yml` blijft voor SSH-connect/list/preview/deploy bestaan. Er wordt **geen extra back-up gemaakt**, geen serverbestand vervangen en geen automatische cron/schedule toegevoegd.
 
+## Automatische SSH-controle op main — alleen lezen
+
+De aparte workflow [Hostinger 1 - automatische SSH-voorcontrole](https://github.com/Yolol100/onderhoud/actions/workflows/hostinger1-ssh-preflight.yml) wordt na een push naar `main` automatisch gestart wanneer de workflow zelf of de twee onderhoudsscripts veranderen. Dit is **uitsluitend** de bestaande `preflight` via dezelfde beveiligde Hostinger 1 Environment en SSH-hostkey; nooit `update`. Ook handmatig `workflow_dispatch` is mogelijk. Deze route werkt zonder ChatGPT Actions:write API-recht, omdat GitHub zelf op de push reageert.
+
+Bij afwijkende WordPress-roots rapporteert de SSH-audit naast de foutcategorie uitsluitend geanonimiseerde aantallen: hoeveel subinstallaties **binnen/buiten een publieke webroot** staan en hoeveel daarvan volgens `wp core is-installed` wel/niet een bereikbare database hebben. Een onbereikbare database bewijst niet dat het een backup is; een bereikbare database bewijst niet dat het een live productiesite is. Geen van deze aantallen geeft automatisch goedkeuring om drie onbekende installaties te negeren of te updaten. Een geblokkeerde preflight **moet** rood eindigen.
+
 ## Stap 1 — alleen-lezen preflight
 
 Open [WordPress bulkupdate - Hostinger 1](https://github.com/Yolol100/onderhoud/actions/workflows/wordpress-onderhoud-hostinger-1.yml), kies `main`, `Run workflow`, `action: preflight`. Laat `confirm`, `script_sha256` en `inventory_sha256` leeg.

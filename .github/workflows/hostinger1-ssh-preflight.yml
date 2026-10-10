@@ -1,0 +1,48 @@
+name: Hostinger 1 - automatische SSH-voorcontrole (alleen lezen)
+
+# GitHub kan na een push naar main zelf SSH starten zonder aparte dispatch-API.
+# Er is bewust GEEN pad waarmee een push het WordPress-updatescript uitvoert.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hostinger1-ssh-preflight.yml'
+      - 'scripts/wordpress_maintenance.py'
+      - 'scripts/wordpress_maintenance_remote.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-ssh-operations
+  cancel-in-progress: false
+
+jobs:
+  ssh-preflight:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: hostinger-1
+    steps:
+      - name: Checkout van main zonder opgeslagen token
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Controleer de scripts en regressietests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/hostinger.py scripts/wordpress_maintenance.py
+          bash -n scripts/wordpress_maintenance_remote.sh
+          python3 -m unittest discover -s tests -q
+      - name: Voer uitsluitend SSH-preflight uit (geen websitewijzigingen)
+        shell: bash
+        env:
+          HOSTINGER_SITES_JSON: ${{ secrets.HOSTINGER_SITES_JSON }}
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          python3 scripts/wordpress_maintenance.py preflight
