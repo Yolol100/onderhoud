@@ -71,6 +71,50 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("/plugins/", m.destination({**SITE, "type": "plugin"}, ACCOUNT))
 
 
+class HostingBindingTests(unittest.TestCase):
+    def test_all_seven_observed_environment_bindings_are_unique(self):
+        pins = m.HOSTING_ACCOUNT_FINGERPRINTS
+        self.assertEqual(set(pins), {f"hostinger-{i}" for i in range(1, 8)})
+        self.assertEqual(len(set(pins.values())), 7)
+
+    def test_selected_account_is_checked_before_ssh_or_secret_use(self):
+        original = cfg(include_site=False)
+        fp = m.account_fingerprint(original)
+        with patch.dict(m.HOSTING_ACCOUNT_FINGERPRINTS, {"hostinger-5": fp}):
+            with patch.dict(os.environ, {"HOSTING_ENV": "hostinger-5"}):
+                with patch.object(m, "verify_account") as ssh_call:
+                    with self.assertRaises(m.Blocked):
+                        swapped = cfg(include_site=False)
+                        swapped["account"]["user"] = "u987654321"
+                        m.execute("connect", "", "", swapped)
+                    ssh_call.assert_not_called()
+
+    def test_wrong_environment_and_unverified_number_fail_closed(self):
+        with self.assertRaises(m.Blocked):
+            m.verify_hosting_binding(cfg(include_site=False), "hostinger-8")
+        with self.assertRaises(m.Blocked):
+            m.verify_hosting_binding(cfg(include_site=False), "hostinger-7")
+
+    def test_correct_binding_preserves_readonly_connect(self):
+        config = cfg(include_site=False)
+        expected = m.account_fingerprint(config)
+        key = "-----BEGIN OPENSSH PRIVATE KEY-----\\ntest\\n-----END OPENSSH PRIVATE KEY-----"
+        with patch.dict(m.HOSTING_ACCOUNT_FINGERPRINTS, {"hostinger-5": expected}):
+            with patch.dict(os.environ, {
+                "HOSTING_ENV": "hostinger-5",
+                "HOSTINGER_SSH_PRIVATE_KEY": key,
+                "HOSTINGER_SSH_KNOWN_HOSTS": "[123.123.123.123]:65002 ssh-ed25519 test",
+            }):
+                with patch.object(m, "verify_account") as ssh_call:
+                    m.execute("connect", "", "", config)
+                    ssh_call.assert_called_once()
+
+    def test_workflow_passes_selected_environment_to_guard(self):
+        workflow = (ROOT / ".github/workflows/hostinger.yml").read_text()
+        self.assertIn("HOSTING_ENV: " + chr(36) + "{{ inputs.hosting }}", workflow)
+        self.assertNotIn("StrictHostKeyChecking=no", workflow)
+
+
 class PayloadTests(unittest.TestCase):
     def make(self, files):
         directory = tempfile.TemporaryDirectory()

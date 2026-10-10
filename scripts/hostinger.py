@@ -6,6 +6,7 @@ Never runs maintenance, SQL, WP-CLI batches, backup jobs or arbitrary commands.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -82,6 +83,37 @@ def validate_config(data: object) -> dict:
                 and not parts.fragment,
                 f"{site_id}: health URL must be HTTPS on exact domain")
     return data
+
+
+
+# Pinned SHA-256 of "user|host|port" from verified 2026-10-10 Actions SSH
+# inventories. These are account-configuration bindings, NOT server hostkeys.
+# Only the seven observed environments are allowed until separately verified.
+HOSTING_ACCOUNT_FINGERPRINTS = {
+    "hostinger-1": "603613a9cbc2dcd0d7c3e01ebafd4df5223751ea5f9858d3b8fda5f74da610b0",
+    "hostinger-2": "f3b0e1785a47be0d34952eccec203e266c36d2a765da141f0603452a0bc1695f",
+    "hostinger-3": "25b42ecc080b3d2a40f29ff0ccdbaf4dbc450648667e3cf6f33936be70a53163",
+    "hostinger-4": "13202f166ca36ffdf943408f723b8871db08d4fa2703862dc8e44af42c135597",
+    "hostinger-5": "bc8c65dd7039c81c83d26c3b4232ba46b11cb73fb9b3110957bee66db287f0ba",
+    "hostinger-6": "0d4df3e1d5a2de8501228ecd261dce2df7796800b0eba5731a6ec6981205886b",
+    "hostinger-7": "836e2f0e2dd9704e831d46e411e78e4a97fa8d1d1de3599569f6fed2084bb9ce",
+}
+
+
+def account_fingerprint(config: dict) -> str:
+    """Privacy-safe identity of the configured SSH endpoint, not its hostkey."""
+    account = validate_config(config)["account"]
+    fields = (account["user"], account["host"].lower(), str(account["port"]))
+    return hashlib.sha256("|".join(fields).encode("ascii")).hexdigest()
+
+
+def verify_hosting_binding(config: dict, hosting: str) -> str:
+    """Fail before any SSH call if a selected environment points elsewhere."""
+    require(hosting in HOSTING_ACCOUNT_FINGERPRINTS, "Unverified Hostinger environment")
+    fingerprint = account_fingerprint(config)
+    require(fingerprint == HOSTING_ACCOUNT_FINGERPRINTS[hosting],
+            "Selected Hostinger environment has a different SSH account: STOP")
+    return fingerprint
 
 
 def destination(site: dict, account: dict) -> str:
@@ -201,6 +233,8 @@ def healthcheck(site: dict) -> None:
 def execute(mode: str, site_id: str, confirmation: str, config: dict,
             root: Path = ROOT) -> None:
     config = validate_config(config)
+    if os.environ.get("HOSTING_ENV"):
+        verify_hosting_binding(config, os.environ["HOSTING_ENV"])
     account, sites = config["account"], config["sites"]
     require(mode in ("connect", "list", "preview", "deploy"), "Unsupported action")
     if mode in ("connect", "list"):
