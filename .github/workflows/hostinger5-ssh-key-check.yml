@@ -72,3 +72,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/hostinger.py connect
+      - name: Controleer defecte Bash-updater alleen op syntax (geen uitvoering)
+        shell: bash
+        env:
+          HOSTINGER_SITES_JSON: ${{ secrets.HOSTINGER_SITES_JSON }}
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          python3 scripts/hostinger5_syntax_audit.py
