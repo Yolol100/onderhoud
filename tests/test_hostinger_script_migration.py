@@ -41,6 +41,30 @@ class HostingerScriptMigrationTests(unittest.TestCase):
         changed = {"version": 2, "account": {**account, "host": "other.test"}, "sites": {}}
         self.assertNotEqual(result, migration.account_fingerprint(changed))
 
+    def test_hostinger5_github_ssh_fingerprint_check_is_readonly(self):
+        source = (ROOT / ".github/workflows/hostinger5-ssh-key-check.yml").read_text()
+        for required in (
+            "name: hostinger-5",
+            "permissions:\n  contents: read",
+            "persist-credentials: false",
+            "python3 scripts/hostinger.py connect",
+            'sha256 fingerprint: $fingerprint',
+            "ssh-keygen -y -P '' -f",
+            "secrets.HOSTINGER_SITES_JSON",
+            "secrets.HOSTINGER_SSH_PRIVATE_KEY",
+            "secrets.HOSTINGER_SSH_KNOWN_HOSTS",
+            "group: hostinger-ssh-operations",
+        ):
+            self.assertIn(required, source)
+        for forbidden in (
+            "ssh-keygen -A", "cat \"$HOSTINGER_SSH_PRIVATE_KEY\"",
+            "cat $HOSTINGER_SSH_PRIVATE_KEY",
+            "scripts/wordpress_maintenance.py update",
+            "scripts/hostinger.py deploy", "StrictHostKeyChecking=no",
+            "rm -rf /", "sudo ", "rsync --delete", "ssh-copy-id",
+        ):
+            self.assertNotIn(forbidden, source)
+
     def test_seven_environment_audit_preserves_readonly_scope(self):
         workflow = (ROOT / ".github/workflows/hostinger-wordpress-migration-audit.yml").read_text()
         self.assertIn("hostinger-7]", workflow)
