@@ -1,0 +1,54 @@
+name: WordPress bulkupdate - Hostinger 1
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Eerst preflight (alleen lezen), daarna update (productie)'
+        required: true
+        type: choice
+        default: preflight
+        options: [preflight, update]
+      confirm:
+        description: 'Voor update exact UPDATE:hostinger-1:ALL invullen; bij preflight leeg'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# No concurrent SSH maintenance, deploy or connection jobs against hosting.
+concurrency:
+  group: hostinger-ssh-operations
+  cancel-in-progress: false
+
+jobs:
+  wordpress-maintenance:
+    name: Hostinger 1 - bestaande updater, cache en websitecontrole
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: hostinger-1
+    steps:
+      - name: Checkout van main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Lokale tests en syntaxcontrole (nog geen SSH)
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/hostinger.py scripts/wordpress_maintenance.py
+          bash -n scripts/wordpress_maintenance_remote.sh
+          python3 -m unittest discover -s tests -v
+      - name: Preflight of handmatige WordPress bulkupdate
+        env:
+          HOSTINGER_SITES_JSON: ${{ secrets.HOSTINGER_SITES_JSON }}
+          HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+          MODE: ${{ inputs.action }}
+          CONFIRMATION: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          python3 scripts/wordpress_maintenance.py "$MODE" --confirm "$CONFIRMATION"
