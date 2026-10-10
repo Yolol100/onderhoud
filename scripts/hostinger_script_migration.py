@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -124,6 +125,13 @@ def parse_ssh_output(text):
     return result
 
 
+def account_fingerprint(config):
+    """Compare hosting account identities without publishing SSH hosts/users."""
+    account = validate_config(config)["account"]
+    parts = (account["user"], account["host"].lower(), str(account["port"]))
+    return hashlib.sha256("|".join(parts).encode("ascii")).hexdigest()
+
+
 def inspect(hosting, config, ssh_key, known_hosts):
     require(re.fullmatch(r'hostinger-(?:[1-9]|10)', hosting) is not None, 'Invalid hosting ID')
     account = validate_config(config)['account']
@@ -204,7 +212,10 @@ def main():
         raw = os.environ.get('HOSTINGER_SITES_JSON', '')
         require(bool(raw.strip()), 'Missing HOSTINGER_SITES_JSON')
         policy = load_policy()
-        inventory, code = inspect(hosting, json.loads(raw),
+        config = json.loads(raw)
+        fingerprint = account_fingerprint(config)
+        print("Account-identiteit SHA-256:", fingerprint)
+        inventory, code = inspect(hosting, config,
                                   os.environ.get('HOSTINGER_SSH_PRIVATE_KEY', ''),
                                   os.environ.get('HOSTINGER_SSH_KNOWN_HOSTS', ''))
         return 0 if evaluate(hosting, inventory, code, policy) else 1
