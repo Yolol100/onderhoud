@@ -22,12 +22,23 @@ from hostinger import Blocked, DOMAIN, dns_name_ok, require, ssh_options, valida
 
 SCRIPT = Path(__file__).with_name("wordpress_maintenance_remote.sh")
 CONFIRMATION = "UPDATE:hostinger-1:ALL"
+DIAG_REASONS = {
+    "DIAG_NONSTANDARD": "Afwijkende WordPress-mapstructuur",
+    "DIAG_INVALID_DOMAIN": "Ongeldige of afwijkende domeinmapnaam",
+    "DIAG_SYMLINK": "Symbolische link of afwijkend echt pad",
+    "DIAG_INCOMPLETE": "Onvolledige WordPress-bestanden",
+    "DIAG_CORE_UNAVAILABLE": "WordPress-database of WP-CLI niet bereikbaar",
+    "DIAG_HOME_UNAVAILABLE": "WordPress home-URL niet uitleesbaar",
+    "DIAG_HOME_MISMATCH": "WordPress home-URL wijkt af van domeinmap",
+}
+
 EXPECTED_TAGS = {
     "SCRIPT_SHA256", "WORDPRESS_COUNT", "PRECHECK", "UPDATE_EXIT",
     "INVENTORY_SHA256", "WORDPRESS_AFTER", "SITE", "CACHE_OK", "CACHE_FAILED",
     "WP_OK", "WP_FAILED", "CHECK_FAILED", "PENDING_UPDATES",
     "INVENTORY_AFTER_SHA256", "UNSUPPORTED_COUNT", "MULTISITE_COUNT",
     "ERROR_SIGNATURES", "UNSUPPORTED_AFTER", "MULTISITE_AFTER",
+    *DIAG_REASONS, *(key + "_AFTER" for key in DIAG_REASONS),
 }
 FATAL_MARKERS = (
     b"fatal error:", b"error establishing a database connection",
@@ -77,7 +88,8 @@ def parse_remote_output(output: str) -> dict:
                 value = int(value)
             parsed[key] = value
     require(all(k in parsed for k in ("SCRIPT_SHA256", "INVENTORY_SHA256", "WORDPRESS_COUNT",
-                                      "UNSUPPORTED_COUNT", "MULTISITE_COUNT", "PRECHECK")),
+                                      "UNSUPPORTED_COUNT", "MULTISITE_COUNT", "PRECHECK",
+                                      *DIAG_REASONS)),
             "Missing mandatory preflight results")
     return parsed
 
@@ -140,6 +152,12 @@ def evaluate(action: str, result: dict, ssh_rc: int,
     unsupported = result["UNSUPPORTED_COUNT"]
     multisite = result["MULTISITE_COUNT"]
     print(f"Niet-ondersteunde WordPress-locaties: {unsupported}; multisite-installaties: {multisite}")
+    for key, description in DIAG_REASONS.items():
+        value = result[key]
+        if value:
+            print(f"Diagnose: {description}: {value}")
+    require(sum(result[key] for key in DIAG_REASONS) == unsupported,
+            "Inventory diagnostics incomplete or inconsistent")
     require(unsupported == 0 and multisite == 0, "WordPress-inventory needs manual review")
     require(result["PRECHECK"] == "OK", "Remote preflight mismatch or blocked")
     if action == "preflight":
@@ -153,7 +171,10 @@ def evaluate(action: str, result: dict, ssh_rc: int,
     keys = ("UPDATE_EXIT", "WORDPRESS_AFTER", "CACHE_OK", "CACHE_FAILED",
             "WP_OK", "WP_FAILED", "CHECK_FAILED", "PENDING_UPDATES",
             "ERROR_SIGNATURES", "INVENTORY_AFTER_SHA256", "UNSUPPORTED_AFTER", "MULTISITE_AFTER")
-    require(all(key in result for key in keys), "Missing mandatory post-update results")
+    require(all(key in result for key in (*keys, *(key + "_AFTER" for key in DIAG_REASONS))),
+            "Missing mandatory post-update results")
+    require(sum(result[key + "_AFTER"] for key in DIAG_REASONS) == result["UNSUPPORTED_AFTER"],
+            "Post-update inventory diagnostics incomplete")
     domains = result["SITE"]
     expected = result["WORDPRESS_AFTER"]
     require(expected == len(domains), "Incomplete website inventory after update")
@@ -163,6 +184,9 @@ def evaluate(action: str, result: dict, ssh_rc: int,
     print(f"Aangetroffen foutmeldingen: {result['ERROR_SIGNATURES']}; WP-CLI-checkfouten: {result['CHECK_FAILED']}")
     print(f"Resterende door WP-CLI detecteerbare updates: {result['PENDING_UPDATES']}")
     print(f"Niet-ondersteunde roots na update: {result['UNSUPPORTED_AFTER']}; multisite: {result['MULTISITE_AFTER']}")
+    for key, description in DIAG_REASONS.items():
+        if result[key + "_AFTER"]:
+            print(f"Nacheckdiagnose: {description}: {result[key + '_AFTER']}")
     print("Extra plugin-cache: LiteSpeed en WP Rocket, indien actief; fouten tellen mee")
     print("Hostinger server-/CDN-cache: afhankelijk van bestaande updater; niet apart geverifieerd")
     with ThreadPoolExecutor(max_workers=6) as pool:
