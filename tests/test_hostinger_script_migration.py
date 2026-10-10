@@ -31,6 +31,24 @@ ARCHIVE_DIGEST = "86b104f5107e2a69e70377b99328014d1e2401c7dca9c28ff3553aff211ac1
 
 
 class HostingerScriptMigrationTests(unittest.TestCase):
+    def test_account_fingerprint_detects_alias_without_revealing_credentials(self):
+        account = {"host": "example.test", "user": "u123456789", "port": 65002}
+        config = {"version": 2, "account": account, "sites": {}}
+        result = migration.account_fingerprint(config)
+        self.assertRegex(result, r"^[a-f0-9]{64}$")
+        self.assertNotIn("example.test", result)
+        self.assertEqual(result, migration.account_fingerprint(config))
+        changed = {"version": 2, "account": {**account, "host": "other.test"}, "sites": {}}
+        self.assertNotEqual(result, migration.account_fingerprint(changed))
+
+    def test_seven_environment_audit_preserves_readonly_scope(self):
+        workflow = (ROOT / ".github/workflows/hostinger-wordpress-migration-audit.yml").read_text()
+        self.assertIn("hostinger-7]", workflow)
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("max-parallel: 1", workflow)
+        self.assertNotIn("scripts/wordpress_maintenance.py update", workflow)
+        self.assertNotIn("StrictHostKeyChecking=no", workflow)
+
     def test_six_excluded_plugins_are_pinned(self):
         policy = migration.load_policy()
         self.assertEqual(tuple(policy["hostinger-2"]["excluded_plugins"]), EXPECTED_EXCLUSIONS)
