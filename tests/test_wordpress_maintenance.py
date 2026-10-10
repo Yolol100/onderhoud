@@ -22,12 +22,14 @@ ACCOUNT = {"host": "123.123.123.123", "user": "u123456789", "port": 65002}
 CONFIG = {"version": 2, "account": ACCOUNT, "sites": {}}
 DIGEST = "a" * 64
 INV_DIGEST = "b" * 64
+DIAG_FIELDS = "".join(f"MAINT\t{key}\t0\n" for key in m.DIAG_REASONS)
+DIAG_FIELDS_AFTER = "".join(f"MAINT\t{key}_AFTER\t0\n" for key in m.DIAG_REASONS)
 PREFLIGHT = (f"MAINT\tSCRIPT_SHA256\t{DIGEST}\nMAINT\tINVENTORY_SHA256\t{INV_DIGEST}\n"
              "MAINT\tWORDPRESS_COUNT\t1\nMAINT\tUNSUPPORTED_COUNT\t0\n"
-             "MAINT\tMULTISITE_COUNT\t0\nMAINT\tPRECHECK\tOK\n")
+             "MAINT\tMULTISITE_COUNT\t0\n" + DIAG_FIELDS + "MAINT\tPRECHECK\tOK\n")
 UPDATE = (PREFLIGHT + "MAINT\tUPDATE_EXIT\t0\nMAINT\tWORDPRESS_AFTER\t1\n"
           "MAINT\tSITE\texample.com\nMAINT\tERROR_SIGNATURES\t0\n"
-          "MAINT\tUNSUPPORTED_AFTER\t0\nMAINT\tMULTISITE_AFTER\t0\n"
+          "MAINT\tUNSUPPORTED_AFTER\t0\nMAINT\tMULTISITE_AFTER\t0\n" + DIAG_FIELDS_AFTER +
           "MAINT\tCACHE_OK\t1\nMAINT\tCACHE_FAILED\t0\nMAINT\tWP_OK\t1\n"
           "MAINT\tWP_FAILED\t0\nMAINT\tCHECK_FAILED\t0\n"
           f"MAINT\tPENDING_UPDATES\t0\nMAINT\tINVENTORY_AFTER_SHA256\t{INV_DIGEST}\n")
@@ -90,7 +92,7 @@ class RequestGuards(unittest.TestCase):
                               {"CACHE_FAILED": 1}, {"WP_FAILED": 1},
                               {"CHECK_FAILED": 1}, {"PENDING_UPDATES": 1},
                               {"INVENTORY_AFTER_SHA256": "c" * 64},
-                              {"UNSUPPORTED_AFTER": 1}, {"MULTISITE_AFTER": 1}):
+                              {"UNSUPPORTED_AFTER": 1, "DIAG_HOME_MISMATCH_AFTER": 1}, {"MULTISITE_AFTER": 1}):
                 with self.subTest(overrides=overrides), contextlib.redirect_stdout(io.StringIO()):
                     self.assertFalse(m.evaluate("update", {**clean, **overrides}, 0, DIGEST, INV_DIGEST))
             with self.assertRaises(m.Blocked):
@@ -148,8 +150,10 @@ exit "${UPDATE_RC:-0}"
         wp = self.bin / "wp"
         wp.write_text('''#!/usr/bin/env bash
 printf 'WP: %s\n' "$*" >> "$MAINT_TRACE"
+if [[ "$*" == *"core is-installed"* && "${CORE_FAIL:-0}" == "1" ]]; then exit 7; fi
 if [[ "$*" == *"--network"* ]]; then [[ "${IS_MULTISITE:-0}" == "1" || -f "$HOME/turn_on_multisite" ]]; exit $?; fi
 if [[ "$*" == *"option get home"* ]]; then
+  if [[ "${HOME_READ_FAIL:-0}" == "1" ]]; then exit 7; fi
   if [[ "${HOME_MISMATCH:-0}" == "1" ]]; then echo "https://unrelated.example"; exit 0; fi
   mypath="${1#--path=}"
   mydomain="${mypath%/public_html}"
@@ -283,12 +287,92 @@ exit 0
         r = self.update()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("MAINT\tUNSUPPORTED_AFTER\t1", r.stdout)
+        self.assertIn("MAINT\tDIAG_NONSTANDARD_AFTER\t1", r.stdout)
 
     def test_multisite_activated_during_update_is_never_green(self):
         self.set_updater('#!/usr/bin/env bash\ntouch "$HOME/turn_on_multisite"\nexit 0\n')
         r = self.update()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("MAINT\tMULTISITE_AFTER\t1", r.stdout)
+
+    def test_anonymized_reason_counts_for_realistic_three_failures(self):
+        self.mk_site("backup.example", "public_html/archived")
+        partial = self.domains / "partial.example/public_html"
+        partial.mkdir(parents=True)
+        (partial / "wp-load.php").touch()
+        run, info = self.preflight(HOME_MISMATCH="1")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(info["WORDPRESS_COUNT"], "1")
+        self.assertEqual(info["UNSUPPORTED_COUNT"], "3")
+        self.assertEqual(info["DIAG_NONSTANDARD"], "1")
+        self.assertEqual(info["DIAG_INCOMPLETE"], "1")
+        self.assertEqual(info["DIAG_HOME_MISMATCH"], "1")
+        self.assertIn("MAINT\tPRECHECK\tBLOCKED", run.stdout)
+        for private in ("backup.example", "partial.example", "example.com"):
+            self.assertNotIn(private, run.stdout)
+        parsed = m.parse_remote_output(run.stdout)
+        with self.assertRaises(m.Blocked), contextlib.redirect_stdout(io.StringIO()) as printed:
+            m.evaluate("preflight", parsed, run.returncode)
+        report = printed.getvalue()
+        self.assertIn("Afwijkende WordPress-mapstructuur: 1", report)
+        self.assertIn("Onvolledige WordPress-bestanden: 1", report)
+        self.assertIn("WordPress home-URL wijkt af", report)
+        self.assertNotIn("backup.example", report)
+
+    def test_diagnostic_db_and_home_read_failures(self):
+        run, info = self.preflight(CORE_FAIL="1")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(info["DIAG_CORE_UNAVAILABLE"], "1")
+        self.assertEqual(info["UNSUPPORTED_COUNT"], "1")
+        run, info = self.preflight(HOME_READ_FAIL="1")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(info["DIAG_HOME_UNAVAILABLE"], "1")
+        self.assertEqual(info["UNSUPPORTED_COUNT"], "1")
+
+    def test_unusual_domain_name_has_its_own_diagnostic(self):
+        self.mk_site("broken_domain", "public_html")
+        run, info = self.preflight()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(info["DIAG_INVALID_DOMAIN"], "1")
+        self.assertEqual(info["UNSUPPORTED_COUNT"], "1")
+        self.assertNotIn("broken_domain", run.stdout)
+
+    def test_symlink_webroot_is_accounted_for(self):
+        link = self.domains / "alias.example/public_html"
+        link.parent.mkdir()
+        link.symlink_to(self.site, target_is_directory=True)
+        run, info = self.preflight()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(info["UNSUPPORTED_COUNT"], "1")
+        self.assertEqual(info["DIAG_SYMLINK"], "1")
+
+    def test_large_mixed_inventory_counts_without_names(self):
+        for i in range(29):
+            self.mk_site(f"site{i}.example", "public_html")
+        self.mk_site("nested.example", "public_html/blog")
+        partial = self.domains / "partial.example/public_html"
+        partial.mkdir(parents=True)
+        (partial / "wp-load.php").touch()
+        link = self.domains / "alias.example/public_html"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(self.site, target_is_directory=True)
+        run, info = self.preflight()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertEqual(info["WORDPRESS_COUNT"], "30")
+        self.assertEqual(info["UNSUPPORTED_COUNT"], "3")
+        self.assertEqual(info["DIAG_NONSTANDARD"], "1")
+        self.assertEqual(info["DIAG_INCOMPLETE"], "1")
+        self.assertEqual(info["DIAG_SYMLINK"], "1")
+        self.assertNotIn("site0.example", run.stdout)
+
+    def test_parser_rejects_diagnostic_omissions_and_mismatch(self):
+        with self.assertRaises(m.Blocked):
+            m.parse_remote_output(PREFLIGHT.replace("MAINT\tDIAG_INCOMPLETE\t0\n", ""))
+        parsed = m.parse_remote_output(PREFLIGHT)
+        parsed["UNSUPPORTED_COUNT"] = 1
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(m.Blocked):
+                m.evaluate("preflight", parsed, 17)
 
     def test_symlink_script_and_missing_root_block(self):
         self.script.unlink()
