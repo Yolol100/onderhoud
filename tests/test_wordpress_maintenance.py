@@ -27,6 +27,7 @@ PREFLIGHT = (f"MAINT\tSCRIPT_SHA256\t{DIGEST}\nMAINT\tINVENTORY_SHA256\t{INV_DIG
              "MAINT\tMULTISITE_COUNT\t0\nMAINT\tPRECHECK\tOK\n")
 UPDATE = (PREFLIGHT + "MAINT\tUPDATE_EXIT\t0\nMAINT\tWORDPRESS_AFTER\t1\n"
           "MAINT\tSITE\texample.com\nMAINT\tERROR_SIGNATURES\t0\n"
+          "MAINT\tUNSUPPORTED_AFTER\t0\nMAINT\tMULTISITE_AFTER\t0\n"
           "MAINT\tCACHE_OK\t1\nMAINT\tCACHE_FAILED\t0\nMAINT\tWP_OK\t1\n"
           "MAINT\tWP_FAILED\t0\nMAINT\tCHECK_FAILED\t0\n"
           f"MAINT\tPENDING_UPDATES\t0\nMAINT\tINVENTORY_AFTER_SHA256\t{INV_DIGEST}\n")
@@ -88,7 +89,8 @@ class RequestGuards(unittest.TestCase):
             for overrides in ({"UPDATE_EXIT": 2}, {"ERROR_SIGNATURES": 1},
                               {"CACHE_FAILED": 1}, {"WP_FAILED": 1},
                               {"CHECK_FAILED": 1}, {"PENDING_UPDATES": 1},
-                              {"INVENTORY_AFTER_SHA256": "c" * 64}):
+                              {"INVENTORY_AFTER_SHA256": "c" * 64},
+                              {"UNSUPPORTED_AFTER": 1}, {"MULTISITE_AFTER": 1}):
                 with self.subTest(overrides=overrides), contextlib.redirect_stdout(io.StringIO()):
                     self.assertFalse(m.evaluate("update", {**clean, **overrides}, 0, DIGEST, INV_DIGEST))
             with self.assertRaises(m.Blocked):
@@ -146,7 +148,7 @@ exit "${UPDATE_RC:-0}"
         wp = self.bin / "wp"
         wp.write_text('''#!/usr/bin/env bash
 printf 'WP: %s\n' "$*" >> "$MAINT_TRACE"
-if [[ "$*" == *"--network"* ]]; then [[ "${IS_MULTISITE:-0}" == "1" ]]; exit $?; fi
+if [[ "$*" == *"--network"* ]]; then [[ "${IS_MULTISITE:-0}" == "1" || -f "$HOME/turn_on_multisite" ]]; exit $?; fi
 if [[ "$*" == *"option get home"* ]]; then
   if [[ "${HOME_MISMATCH:-0}" == "1" ]]; then echo "https://unrelated.example"; exit 0; fi
   mypath="${1#--path=}"
@@ -271,6 +273,22 @@ exit 0
         r, info = self.preflight(HOME_MISMATCH="1")
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(info["UNSUPPORTED_COUNT"], "1")
+
+    def test_new_nested_wordpress_after_update_is_never_green(self):
+        self.set_updater('''#!/usr/bin/env bash
+mkdir -p "$HOME/domains/extra.com/public_html/blog/wp-includes"
+touch "$HOME/domains/extra.com/public_html/blog/wp-load.php" "$HOME/domains/extra.com/public_html/blog/wp-includes/version.php"
+exit 0
+''')
+        r = self.update()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("MAINT\tUNSUPPORTED_AFTER\t1", r.stdout)
+
+    def test_multisite_activated_during_update_is_never_green(self):
+        self.set_updater('#!/usr/bin/env bash\ntouch "$HOME/turn_on_multisite"\nexit 0\n')
+        r = self.update()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("MAINT\tMULTISITE_AFTER\t1", r.stdout)
 
     def test_symlink_script_and_missing_root_block(self):
         self.script.unlink()
