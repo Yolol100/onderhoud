@@ -24,7 +24,10 @@ SCRIPT = Path(__file__).with_name("wordpress_maintenance_remote.sh")
 CONFIRMATION = "UPDATE:hostinger-1:ALL"
 EXPECTED_TAGS = {
     "SCRIPT_SHA256", "WORDPRESS_COUNT", "PRECHECK", "UPDATE_EXIT",
-    "WORDPRESS_AFTER", "SITE", "CACHE_OK", "CACHE_FAILED", "WP_OK", "WP_FAILED",
+    "INVENTORY_SHA256", "WORDPRESS_AFTER", "SITE", "CACHE_OK", "CACHE_FAILED",
+    "WP_OK", "WP_FAILED", "CHECK_FAILED", "PENDING_UPDATES",
+    "INVENTORY_AFTER_SHA256", "UNSUPPORTED_COUNT", "MULTISITE_COUNT",
+    "ERROR_SIGNATURES", "UNSUPPORTED_AFTER", "MULTISITE_AFTER",
 }
 FATAL_MARKERS = (
     b"fatal error:", b"error establishing a database connection",
@@ -32,13 +35,19 @@ FATAL_MARKERS = (
 )
 
 
-def validate_request(action: str, confirmation: str, config: dict) -> dict:
+def validate_request(action: str, confirmation: str, config: dict,
+                     expected_script: str = "", expected_inventory: str = "") -> dict:
     require(action in ("preflight", "update"), "Unsupported maintenance action")
     if action == "update":
         require(confirmation == CONFIRMATION,
                 "Update requires exact confirmation: UPDATE:hostinger-1:ALL")
+        require(bool(re.fullmatch(r"[0-9a-f]{64}", expected_script)),
+                "Update requires SHA-256 from approved preflight")
+        require(bool(re.fullmatch(r"[0-9a-f]{64}", expected_inventory)),
+                "Update requires inventory SHA-256 from approved preflight")
     else:
-        require(not confirmation, "Preflight must not contain update confirmation")
+        require(not confirmation and not expected_script and not expected_inventory,
+                "Preflight must not contain update credentials")
     return validate_config(config)
 
 
@@ -58,24 +67,27 @@ def parse_remote_output(output: str) -> dict:
             require(len(parsed["SITE"]) <= 250, "Too many websites in result")
         else:
             require(key not in parsed, "Duplicate remote result field")
-            if key == "SCRIPT_SHA256":
-                require(bool(re.fullmatch(r"[0-9a-f]{64}", value)), "Invalid script digest")
+            if key in ("SCRIPT_SHA256", "INVENTORY_SHA256", "INVENTORY_AFTER_SHA256"):
+                require(bool(re.fullmatch(r"[0-9a-f]{64}", value)), "Invalid digest")
             elif key == "PRECHECK":
-                require(value == "OK", "Invalid preflight status")
+                require(value in ("OK", "BLOCKED", "MISMATCH"), "Invalid preflight status")
             else:
                 require(value.isascii() and value.isdecimal() and len(value) <= 6,
                         "Invalid numeric result")
                 value = int(value)
             parsed[key] = value
-    require("SCRIPT_SHA256" in parsed and "WORDPRESS_COUNT" in parsed,
+    require(all(k in parsed for k in ("SCRIPT_SHA256", "INVENTORY_SHA256", "WORDPRESS_COUNT",
+                                      "UNSUPPORTED_COUNT", "MULTISITE_COUNT", "PRECHECK")),
             "Missing mandatory preflight results")
     return parsed
 
 
-def run_remote(ssh: list[str], account: dict, action: str) -> tuple[dict, int]:
+def run_remote(ssh: list[str], account: dict, action: str,
+               expected_script: str = "", expected_inventory: str = "") -> tuple[dict, int]:
     payload = SCRIPT.read_text(encoding="utf-8")
-    remote_args = ssh + [f"{account['user']}@{account['host']}",
-                         f"bash -s -- {action}"]
+    remote_command = "bash -s -- preflight" if action == "preflight" else (
+        f"bash -s -- update {expected_script} {expected_inventory}")
+    remote_args = ssh + [f"{account['user']}@{account['host']}", remote_command]
     try:
         completed = subprocess.run(remote_args, input=payload, text=True,
                                    capture_output=True, check=False, timeout=4300)
@@ -118,18 +130,29 @@ def public_healthcheck(domain: str) -> bool:
         return False
 
 
-def evaluate(action: str, result: dict, ssh_rc: int) -> bool:
+def evaluate(action: str, result: dict, ssh_rc: int,
+             expected_script: str = "", expected_inventory: str = "") -> bool:
     count = result["WORDPRESS_COUNT"]
     print(f"Bestaand updatescript (SHA-256): {result['SCRIPT_SHA256']}")
+    print(f"WordPress-inventaris (SHA-256): {result['INVENTORY_SHA256']}")
     require(isinstance(count, int) and count > 0, "No WordPress sites found")
     print(f"WordPress-installaties gevonden: {count}")
+    unsupported = result["UNSUPPORTED_COUNT"]
+    multisite = result["MULTISITE_COUNT"]
+    print(f"Niet-ondersteunde WordPress-locaties: {unsupported}; multisite-installaties: {multisite}")
+    require(unsupported == 0 and multisite == 0, "WordPress-inventory needs manual review")
+    require(result["PRECHECK"] == "OK", "Remote preflight mismatch or blocked")
     if action == "preflight":
-        require(ssh_rc == 0 and result.get("PRECHECK") == "OK",
-                "Remote preflight failed")
+        require(ssh_rc == 0, "Remote preflight failed")
         print("PREFLIGHT OK: geen update, cacheverwijdering of back-upactie gestart")
         return True
 
-    keys = ("UPDATE_EXIT", "WORDPRESS_AFTER", "CACHE_OK", "CACHE_FAILED", "WP_OK", "WP_FAILED")
+    require(result["SCRIPT_SHA256"] == expected_script and
+            result["INVENTORY_SHA256"] == expected_inventory,
+            "Update script/inventory changed since approved preflight")
+    keys = ("UPDATE_EXIT", "WORDPRESS_AFTER", "CACHE_OK", "CACHE_FAILED",
+            "WP_OK", "WP_FAILED", "CHECK_FAILED", "PENDING_UPDATES",
+            "ERROR_SIGNATURES", "INVENTORY_AFTER_SHA256", "UNSUPPORTED_AFTER", "MULTISITE_AFTER")
     require(all(key in result for key in keys), "Missing mandatory post-update results")
     domains = result["SITE"]
     expected = result["WORDPRESS_AFTER"]
@@ -137,6 +160,9 @@ def evaluate(action: str, result: dict, ssh_rc: int) -> bool:
     print(f"Updater afsluitcode: {result['UPDATE_EXIT']}")
     print(f"Na update: {result['WP_OK']}/{expected} WordPress-runtimecontroles geslaagd")
     print(f"Objectcaches geslaagd: {result['CACHE_OK']}/{expected}; cachefouten: {result['CACHE_FAILED']}")
+    print(f"Aangetroffen foutmeldingen: {result['ERROR_SIGNATURES']}; WP-CLI-checkfouten: {result['CHECK_FAILED']}")
+    print(f"Resterende door WP-CLI detecteerbare updates: {result['PENDING_UPDATES']}")
+    print(f"Niet-ondersteunde roots na update: {result['UNSUPPORTED_AFTER']}; multisite: {result['MULTISITE_AFTER']}")
     print("Extra plugin-cache: LiteSpeed en WP Rocket, indien actief; fouten tellen mee")
     print("Hostinger server-/CDN-cache: afhankelijk van bestaande updater; niet apart geverifieerd")
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -149,13 +175,18 @@ def evaluate(action: str, result: dict, ssh_rc: int) -> bool:
     full = (ssh_rc == 0 and result["UPDATE_EXIT"] == 0 and expected == count
             and result["WP_OK"] == expected and result["WP_FAILED"] == 0
             and result["CACHE_OK"] == expected and result["CACHE_FAILED"] == 0
+            and result["ERROR_SIGNATURES"] == 0 and result["CHECK_FAILED"] == 0
+            and result["PENDING_UPDATES"] == 0
+            and result["UNSUPPORTED_AFTER"] == 0 and result["MULTISITE_AFTER"] == 0
+            and result["INVENTORY_AFTER_SHA256"] == expected_inventory
             and good == len(domains) and expected > 0)
     print("RESULTAAT: GESLAAGD" if full else "RESULTAAT: NIET VOLLEDIG - bekijk privé-serverlog")
     return full
 
 
-def execute(action: str, confirmation: str, config: dict) -> int:
-    config = validate_request(action, confirmation, config)
+def execute(action: str, confirmation: str, config: dict,
+            expected_script: str = "", expected_inventory: str = "") -> int:
+    config = validate_request(action, confirmation, config, expected_script, expected_inventory)
     key = os.environ.get("HOSTINGER_SSH_PRIVATE_KEY", "")
     hosts = os.environ.get("HOSTINGER_SSH_KNOWN_HOSTS", "")
     require(key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
@@ -176,19 +207,22 @@ def execute(action: str, confirmation: str, config: dict) -> int:
         ssh = ssh_options(account, key_path, hosts_path)
         ssh += ["-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4"]
         verify_account(account, ssh)
-        result, rc = run_remote(ssh, account, action)
-    return 0 if evaluate(action, result, rc) else 1
+        result, rc = run_remote(ssh, account, action, expected_script, expected_inventory)
+    return 0 if evaluate(action, result, rc, expected_script, expected_inventory) else 1
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manual Hostinger-1 WordPress maintenance")
     parser.add_argument("action", choices=("preflight", "update"))
     parser.add_argument("--confirm", default="")
+    parser.add_argument("--script-sha256", default="")
+    parser.add_argument("--inventory-sha256", default="")
     args = parser.parse_args()
     try:
         raw = os.environ.get("HOSTINGER_SITES_JSON", "")
         require(bool(raw.strip()), "Missing HOSTINGER_SITES_JSON")
-        return execute(args.action, args.confirm, json.loads(raw))
+        return execute(args.action, args.confirm, json.loads(raw),
+                       args.script_sha256, args.inventory_sha256)
     except (Blocked, ValueError, TypeError, OSError) as exc:
         print(f"STOP: {exc}", file=sys.stderr)
         return 1

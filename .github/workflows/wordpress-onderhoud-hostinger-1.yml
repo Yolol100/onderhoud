@@ -14,6 +14,16 @@ on:
         required: false
         type: string
         default: ''
+      script_sha256:
+        description: 'Voor update: SHA-256 van het bestaande script uit geslaagde preflight'
+        required: false
+        type: string
+        default: ''
+      inventory_sha256:
+        description: 'Voor update: WordPress-inventaris SHA-256 uit dezelfde preflight'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -33,7 +43,7 @@ jobs:
       name: hostinger-1
     steps:
       - name: Checkout van main
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Lokale tests en syntaxcontrole (nog geen SSH)
@@ -49,6 +59,8 @@ jobs:
           HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
           MODE: ${{ inputs.action }}
           CONFIRMATION: ${{ inputs.confirm }}
+          EXPECTED_SCRIPT_SHA256: ${{ inputs.script_sha256 }}
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.inventory_sha256 }}
         run: |
           set -euo pipefail
-          python3 scripts/wordpress_maintenance.py "$MODE" --confirm "$CONFIRMATION"
+          python3 scripts/wordpress_maintenance.py "$MODE" --confirm "$CONFIRMATION" --script-sha256 "$EXPECTED_SCRIPT_SHA256" --inventory-sha256 "$EXPECTED_INVENTORY_SHA256"
