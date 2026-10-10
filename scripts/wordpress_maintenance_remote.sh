@@ -140,6 +140,8 @@ discover_sites
 inventory_rc=$?
 after_count=${#site_paths[@]}
 printf 'MAINT\tWORDPRESS_AFTER\t%s\n' "$after_count"
+printf 'MAINT\tUNSUPPORTED_AFTER\t%s\n' "$unsupported_count"
+printf 'MAINT\tMULTISITE_AFTER\t%s\n' "$multisite_count"
 post_inventory_hash="$inventory_hash"
 cache_ok=0
 cache_failed=0
@@ -219,6 +221,7 @@ printf 'MAINT\tPENDING_UPDATES\t%s\n' "$pending_updates"
 printf 'MAINT\tINVENTORY_AFTER_SHA256\t%s\n' "$post_inventory_hash"
 if [[ "$update_rc" -ne 0 || "$error_signatures" -ne 0 || "$inventory_rc" -ne 0 ||
       "$post_inventory_hash" != "$expected_inventory" || "$after_count" -ne "$before_count" ||
+      "$unsupported_count" -ne 0 || "$multisite_count" -ne 0 ||
       "$cache_failed" -ne 0 || "$wp_failed" -ne 0 || "$check_failed" -ne 0 || "$pending_updates" -ne 0 ]]; then
   exit 20
 fi
