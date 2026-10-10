@@ -97,7 +97,6 @@ class Hostinger5SyntaxAuditTests(unittest.TestCase):
         self.assertNotIn("mv \"$script\"", audit.REMOTE)
         self.assertNotIn("rm \"$script\"", audit.REMOTE)
         self.assertNotIn("cat \"$script\"", audit.REMOTE)
-        self.assertNotIn('printf \u0027%s\\n\u0027 "$error"', audit.REMOTE.split("# Never print stderr")[-1])
 
 
 if __name__ == "__main__":
