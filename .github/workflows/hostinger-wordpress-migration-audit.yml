@@ -9,6 +9,7 @@ on:
       - '.github/workflows/hostinger-wordpress-migration-audit.yml'
       - 'scripts/hostinger_script_migration.py'
       - 'config/wordpress-migration-policy.json'
+      - 'scripts/hostinger.py'
   workflow_dispatch:
 
 permissions:
