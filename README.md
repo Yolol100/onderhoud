@@ -12,10 +12,15 @@ De GitHub Actions-keuzelijst gebruikt consequent `hostinger-1` tot en met
   thema- of pluginmap; wijzigt niets op de server.
 - **deploy**: uitsluitend voor een vooraf geregistreerde thema/pluginmap met
   expliciete typed bevestiging en controle achteraf.
+- **WordPress bulkupdate - Hostinger 1**: aparte, uitsluitend handmatige
+  onderhoudsworkflow voor het bestaande `$HOME/domains/update_wordpress.sh`,
+  gevolgd door cache- en basiswebsitecontroles. Lees eerst
+  [WordPress-onderhoud](docs/WORDPRESS-ONDERHOUD.md).
 
-Geen automatische WordPress-/WooCommerce-updates, cronjobs, back-upjobs,
-onderhoudsscripts, SQL-commando's of willekeurige shellinvoer. Hostinger beheert
-bestaande providerback-ups.
+Geen cronjobs, nieuwe back-upjobs, willekeurige SSH-/SQL-commando's of
+geautomatiseerde updates op andere hostingnummers. Het bestaande serverscript
+blijft onafhankelijk: zijn inhoud moet vooraf worden gecontroleerd. Hostinger
+beheert eventuele providerback-ups; de workflow verifieert ze niet.
 
 ## Opnieuw beginnen
 
@@ -38,3 +43,5 @@ Een lege `sites`-lijst is voldoende voor de read-only verbindingstest.
 - Maak de repository privé voordat je klantcode of niet-openbare thema's toevoegt.
 - Nieuwe workflows/tests bewijzen geen live SSH-verbinding totdat `CONNECT OK`
   op het gekozen pakket in GitHub Actions is bevestigd.
+- WordPress-bulkupdate uitsluitend via het aparte Hostinger-1-workflowbestand,
+  op `main` en na invoer van `UPDATE:hostinger-1:ALL`.
