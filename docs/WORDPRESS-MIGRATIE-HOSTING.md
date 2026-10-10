@@ -90,12 +90,44 @@
   daadwerkelijke uitrol **en** succesvolle live readback; deze audit-workflow
   mag dit label nooit produceren.
 
-## Live resultaten na fase A (10 oktober 2026)
+## Bewijs na live SSH-controles — 10 oktober 2026
 
-- Hostinger 1: 33 domeinmappen; bron `domains/update_wordpress.sh` aanwezig met de vastgelegde SHA-256.
-- Hostinger 2: 49 domeinmappen; geen script op de drie eerder verwachte standaardpaden. De zes historische uitgesloten plugins blijven daarom **verplicht**, maar zijn op de actuele server nog niet bevestigd.
-- Hostinger 3 en 4: 37 domeinmappen en dezelfde script-SHA. De uitgebreidere audit vergelijkt ook een **gehashte** domein-inventaris om dubbele of gespiegelde accounts te signaleren zonder domeinnamen uit te schrijven.
-- Hostinger 5: bestaand script met Bash-syntaxfout; de tweede audit onderscheidt welk gecontroleerd script deze fout heeft. Niets vervangen zonder herstel.
-- Hostinger 6: bestaand script onder `domains`; bestaande per-site uitzonderingen moeten bij migratie worden beoordeeld, niet automatisch verwijderd.
+Bronnen: [eerste matrixrun](https://github.com/Yolol100/onderhoud/actions/runs/38054364807),
+[verdiepte run](https://github.com/Yolol100/onderhoud/actions/runs/38055145091)
+en [CI op main](https://github.com/Yolol100/onderhoud/actions/runs/38055145199).
 
-**Nog geen uitrol:** de live broncode van Hostinger 1 is niet veilig als overdraagbaar bestand beoordeeld. Een openbare repository is geen geschikte opslagplaats voor een ongecontroleerd script met mogelijk klantspecifieke waarden, tokens of hostpaden. De SSH-audit controleert daarom alleen metadata en maakt niets aan op de server.
+| Hostinger | Laatste aantoonbare status | Migratieacceptatie |
+| --- | --- | --- |
+| 1 | `domains/update_wordpress.sh` bestaat en Bash-syntax is geldig; 33 domeinmappen; geen `/home/u...`-paden gedetecteerd | Live broninhoud nog **niet** geëxporteerd of op compatibiliteit beoordeeld |
+| 2 | 49 domeinmappen; geen script op drie bekende standaardpaden; tweede, begrensde legacy-SHA-zoektocht vond **nul overeenkomsten** | **Geblokkeerd**: de zes historische exclusies zijn wel lokaal vastgelegd, maar niet tegen actuele scriptinhoud geverifieerd |
+| 3 | Bestaand `domains`-script, geldige syntax; 37 domeinmappen | Eigen configuratie en mogelijke extra uitzonderingen eerst beoordelen |
+| 4 | Bestaand `domains`-script met **dezelfde SHA** als Hostinger 3, maar een **andere domein-inventarisfingerprint** | Niet aannemen dat omgevingen uitwisselbaar zijn; doelaccount per omgeving verifiëren |
+| 5 | `domains/update_wordpress.sh` bestaat, maar **faalt Bash-syntaxcontrole**; 26 domeinmappen | **Geblokkeerd**: bestaand script niet overschrijven zonder inhoudsanalyse/herstel |
+| 6 | Bestaand `domains`-script, geldige syntax; 2 domeinmappen | Eigen configuratie en sitegerichte historische uitzonderingen onderzoeken |
+
+De Hostinger 2-job had in de eerste poging SSH-afsluitcode 255; de geslaagde verbinding in de tweede poging leverde hierboven genoemde nul-matches op. De totaalscore van de matrix blijft **rood door terecht geblokkeerde doelomgevingen**; een rode audit betekent niet dat een updater op de server gedraaid heeft.
+
+### Exclusions: verplicht maar niet live bewezen
+
+Hostinger 2 heeft de zes historische uitsluitingen in
+`config/wordpress-migration-policy.json` en tests opgenomen. Het behoud
+van die slugs in een toekomstig **daadwerkelijk uitgevoerd** script is nog
+niet aangetoond. De audit controleert geen individuele pluginversies.
+
+### Minimale beslissingen vóór scriptuitrol
+
+1. Vergelijk de **actuele live inhoud** van Hostinger 1 met de genoemde SHA,
+   zonder die ongecontroleerd in deze openbare GitHub-repository of Actions-
+   artifacts te plaatsen. Controleer externe API- en tokens-afhankelijkheden.
+2. Controleer of Hostinger 2 nog andere uitsluitingen heeft en bevestig het
+   correcte SSH-account. Gebruik de zes oude uitsluitingen als minimum.
+3. Inspecteer de bestaande code/exclusies van Hostinger 3–6, met name de
+   syntaxfout op Hostinger 5 en eventuele sitespecifieke pluginpins.
+4. Kies daarna pas passende per-host-bronbestanden, voer dry-run/diff uit,
+   installeer onder `$HOME/domains` met atomische vervanging **na
+   gecontroleerde toestemming/herstelroute**, en lees SHA/syntax terug.
+   Geen WordPress-update starten tijdens de scriptmigratie.
+
+**Huidige status:** de migratiecontrole en exclusionsregistratie staan op
+`main`. **Geen** updatescripts zijn naar Hostinger 2–6 gekopieerd of
+overschreven; geen WordPress-sites, caches of back-ups zijn gewijzigd.
