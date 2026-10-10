@@ -12,6 +12,10 @@ De GitHub Actions-keuzelijst gebruikt consequent `hostinger-1` tot en met
   thema- of pluginmap; wijzigt niets op de server.
 - **deploy**: uitsluitend voor een vooraf geregistreerde thema/pluginmap met
   expliciete typed bevestiging en controle achteraf.
+- **Automatische SSH-preflight Hostinger 1**: alleen-lezen SSH-voorcontrole
+  bij relevante pushes naar `main`, met uitsluitend anonieme telwaarden.
+  Een rode run betekent dat de WordPress-installaties nog beoordeeld moeten
+  worden; er wordt niet bijgewerkt.
 - **WordPress bulkupdate - Hostinger 1**: aparte, uitsluitend handmatige
   onderhoudsworkflow voor het bestaande `$HOME/domains/update_wordpress.sh`,
   gevolgd door cache- en basiswebsitecontroles. Lees eerst
