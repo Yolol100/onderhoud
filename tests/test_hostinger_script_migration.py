@@ -45,7 +45,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
                 migration.load_policy(p)
 
     def test_parse_requires_exact_structure_and_counts(self):
-        data = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "CANDIDATE_TRUNCATED", "SOURCE_ACCOUNT_SPECIFIC") else "1")
+        data = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "CANDIDATE_TRUNCATED", "CANDIDATE_ERRORS", "SOURCE_ACCOUNT_SPECIFIC") else "1")
                 for key in migration.FIELDS}
         valid = "".join(f"SCRIPT_AUDIT\t{k}\t{v}\n" for k, v in data.items())
         self.assertEqual(migration.parse_ssh_output(valid), data)
@@ -62,7 +62,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
                     migration.parse_ssh_output(broken)
 
     def test_hostinger2_wrong_checksum_blocks_migration(self):
-        inventory = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "CANDIDATE_TRUNCATED", "SOURCE_ACCOUNT_SPECIFIC") else "1")
+        inventory = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "CANDIDATE_TRUNCATED", "CANDIDATE_ERRORS", "SOURCE_ACCOUNT_SPECIFIC") else "1")
                      for key in migration.FIELDS}
         with contextlib.redirect_stdout(io.StringIO()) as log:
             self.assertFalse(migration.evaluate(
@@ -71,7 +71,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
         self.assertNotIn("cf7-conditional-fields", log.getvalue())
 
     def test_hostinger2_matching_checksum_allows_audit_only(self):
-        inventory = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "CANDIDATE_TRUNCATED", "SOURCE_ACCOUNT_SPECIFIC") else "1")
+        inventory = {key: migration.ABSENT if key in migration.DIGEST_FIELDS else ("0" if key in ("MATCHING_EXCLUSION_FILES", "CANDIDATE_TRUNCATED", "CANDIDATE_ERRORS", "SOURCE_ACCOUNT_SPECIFIC") else "1")
                      for key in migration.FIELDS}
         inventory["HOME_EXCLUSION"] = ARCHIVE_DIGEST
         with contextlib.redirect_stdout(io.StringIO()) as log:
@@ -188,7 +188,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
             scripts.mkdir()
             for i in range(152):
                 (scripts / f"wordpress_update_{i}.sh").write_text("#!/usr/bin/env bash\n")
-            p = subprocess.run(["bash", "-s", "--", migration.ABSENT],
+            p = subprocess.run(["bash", "-s", "--", "a" * 64],
                                input=migration.REMOTE, text=True, capture_output=True,
                                timeout=10, env={**os.environ, "HOME": tmp})
             self.assertEqual(p.returncode, 0, p.stderr)
@@ -197,7 +197,7 @@ class HostingerScriptMigrationTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 self.assertFalse(migration.evaluate("hostinger-3", result, p.returncode,
                                                     migration.load_policy()))
-            self.assertIn("zoekbereik niet volledig", log.getvalue())
+            self.assertIn("scriptzoektocht niet volledig of niet betrouwbaar", log.getvalue())
 
     def test_new_workflow_never_runs_updater_or_writes(self):
         workflow = (ROOT / ".github/workflows/hostinger-wordpress-migration-audit.yml").read_text()

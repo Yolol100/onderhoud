@@ -15,7 +15,7 @@ POLICY_FILE = Path(__file__).resolve().parents[1] / 'config/wordpress-migration-
 FIELDS = ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION',
           'DOMAINS_SCRIPT_SYNTAX', 'HOME_SCRIPT_SYNTAX', 'HOME_EXCLUSION_SYNTAX',
           'WP_CLI', 'DOMAIN_DIRS', 'DOMAIN_NAMES_SHA256', 'SCRIPT_CANDIDATES',
-          'MATCHING_EXCLUSION_FILES', 'CANDIDATE_TRUNCATED', 'SOURCE_ACCOUNT_SPECIFIC')
+          'MATCHING_EXCLUSION_FILES', 'CANDIDATE_TRUNCATED', 'CANDIDATE_SCAN_PERFORMED', 'CANDIDATE_ERRORS', 'SOURCE_ACCOUNT_SPECIFIC')
 DIGEST_FIELDS = {'DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION', 'DOMAIN_NAMES_SHA256'}
 ABSENT = '0' * 64
 REMOTE = r'''#!/usr/bin/env bash
@@ -50,30 +50,40 @@ count="$(find -P "$root" -mindepth 1 -maxdepth 1 -type d -print | wc -l | tr -d 
 printf 'SCRIPT_AUDIT\tDOMAIN_DIRS\t%s\n' "$count"
 name_sha="$(find -P "$root" -mindepth 1 -maxdepth 1 -type d -printf '%f\0' | LC_ALL=C sort -z | sha256sum | cut -d ' ' -f1)"
 printf 'SCRIPT_AUDIT\tDOMAIN_NAMES_SHA256\t%s\n' "$name_sha"
-# Search only predictable script folders. Never descend into public_html.
-# This bounded inspection must not traverse or expose customer webroots.
+# Only Hostinger 2 needs legacy-profile discovery. Other environments
+# report ordinary script slots only, avoiding needless reads of private files.
 candidates=0
 matches=0
 truncated=0
-for base in "$HOME" "$HOME/domains" "$HOME/scripts" "$HOME/bin" "$HOME/tools"; do
-  [[ -d "$base" && ! -L "$base" ]] || continue
-  while IFS= read -r -d '' candidate; do
-    ((candidates += 1))
-    if ((candidates > 150)); then
-      truncated=1
-      break
-    fi
-    if [[ ! -L "$candidate" && -r "$candidate" ]]; then
-      digest="$(sha256sum -- "$candidate" | cut -d ' ' -f1)"
-      if [[ "$digest" == "$expected" ]]; then ((matches += 1)); fi
-    fi
-  done < <(find -P "$base" -mindepth 1 -maxdepth 1 -type f \
-    \( -iname '*wordpress*.sh' -o -iname '*update*.sh' \) -print0)
-  if ((truncated == 1)); then break; fi
-done
+performed=0
+errors=0
+if [[ "$expected" != "0000000000000000000000000000000000000000000000000000000000000000" ]]; then
+  performed=1
+  for base in "$HOME" "$HOME/domains" "$HOME/scripts" "$HOME/bin" "$HOME/tools"; do
+    [[ -d "$base" && ! -L "$base" ]] || continue
+    while IFS= read -r -d '' candidate; do
+      ((candidates += 1))
+      if ((candidates > 150)); then
+        truncated=1
+        break
+      fi
+      if [[ ! -L "$candidate" && -r "$candidate" ]]; then
+        if digest="$(sha256sum -- "$candidate" | cut -d ' ' -f1)"; then
+          if [[ "$digest" == "$expected" ]]; then ((matches += 1)); fi
+        else
+          ((errors += 1))
+        fi
+      fi
+    done < <(find -P "$base" -mindepth 1 -maxdepth 1 -type f \
+      \( -iname '*wordpress*.sh' -o -iname '*update*.sh' \) -print0)
+    if ((truncated == 1)); then break; fi
+  done
+fi
 printf 'SCRIPT_AUDIT\tSCRIPT_CANDIDATES\t%s\n' "$candidates"
 printf 'SCRIPT_AUDIT\tMATCHING_EXCLUSION_FILES\t%s\n' "$matches"
 printf 'SCRIPT_AUDIT\tCANDIDATE_TRUNCATED\t%s\n' "$truncated"
+printf 'SCRIPT_AUDIT\tCANDIDATE_SCAN_PERFORMED\t%s\n' "$performed"
+printf 'SCRIPT_AUDIT\tCANDIDATE_ERRORS\t%s\n' "$errors"
 specific=0
 if [[ -f "$root/update_wordpress.sh" && ! -L "$root/update_wordpress.sh" ]]; then
   if grep -Eq '/home/u[0-9]{4,16}' "$root/update_wordpress.sh"; then specific=1; fi
@@ -136,6 +146,8 @@ def inspect(hosting, config, ssh_key, known_hosts):
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise Blocked('SSH inspection unavailable') from exc
     require(run.stdout.strip(), f'SSH inspection failed (exit {run.returncode})')
+    if run.returncode != 0:
+        raise Blocked(f"Remote read-only scanner stopped (exit {run.returncode})")
     return parse_ssh_output(run.stdout), run.returncode
 
 
@@ -151,6 +163,8 @@ def evaluate(hosting, inventory, returncode, policy):
     print('Update-scriptkandidaten buiten webroots:', inventory['SCRIPT_CANDIDATES'])
     print('Historische exclusieprofielmatches:', inventory['MATCHING_EXCLUSION_FILES'])
     print('Scriptzoeklimiet bereikt:', 'JA' if inventory['CANDIDATE_TRUNCATED'] == '1' else 'NEE')
+    print('Legacy-exclusiezoektocht uitgevoerd:', 'JA' if inventory['CANDIDATE_SCAN_PERFORMED'] == '1' else 'NEE')
+    print('Fouten bij lezen scriptkandidaten:', inventory['CANDIDATE_ERRORS'])
     if hosting == 'hostinger-1':
         print('Accountspecifieke absolute paden in bronscript:',
               'JA' if inventory['SOURCE_ACCOUNT_SPECIFIC'] == '1' else 'NEE')
@@ -168,8 +182,12 @@ def evaluate(hosting, inventory, returncode, policy):
            for k in ('DOMAINS_SCRIPT', 'HOME_SCRIPT', 'HOME_EXCLUSION')):
         print('STATUS: BLOCKED — een bestaand script heeft ongeldige Bash-syntax')
         return False
-    if inventory['CANDIDATE_TRUNCATED'] == '1':
-        print('STATUS: BLOCKED — zoekbereik niet volledig onderzocht')
+    if (inventory['CANDIDATE_TRUNCATED'] == '1'
+            or inventory['CANDIDATE_ERRORS'] != '0'):
+        print('STATUS: BLOCKED — scriptzoektocht niet volledig of niet betrouwbaar')
+        return False
+    if (hosting == 'hostinger-2') != (inventory['CANDIDATE_SCAN_PERFORMED'] == '1'):
+        print('STATUS: BLOCKED — onverwachte zoekscope')
         return False
     if returncode != 0:
         return False
