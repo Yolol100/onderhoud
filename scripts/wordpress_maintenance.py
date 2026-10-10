@@ -27,7 +27,7 @@ EXPECTED_TAGS = {
     "INVENTORY_SHA256", "WORDPRESS_AFTER", "SITE", "CACHE_OK", "CACHE_FAILED",
     "WP_OK", "WP_FAILED", "CHECK_FAILED", "PENDING_UPDATES",
     "INVENTORY_AFTER_SHA256", "UNSUPPORTED_COUNT", "MULTISITE_COUNT",
-    "ERROR_SIGNATURES",
+    "ERROR_SIGNATURES", "UNSUPPORTED_AFTER", "MULTISITE_AFTER",
 }
 FATAL_MARKERS = (
     b"fatal error:", b"error establishing a database connection",
@@ -152,7 +152,7 @@ def evaluate(action: str, result: dict, ssh_rc: int,
             "Update script/inventory changed since approved preflight")
     keys = ("UPDATE_EXIT", "WORDPRESS_AFTER", "CACHE_OK", "CACHE_FAILED",
             "WP_OK", "WP_FAILED", "CHECK_FAILED", "PENDING_UPDATES",
-            "ERROR_SIGNATURES", "INVENTORY_AFTER_SHA256")
+            "ERROR_SIGNATURES", "INVENTORY_AFTER_SHA256", "UNSUPPORTED_AFTER", "MULTISITE_AFTER")
     require(all(key in result for key in keys), "Missing mandatory post-update results")
     domains = result["SITE"]
     expected = result["WORDPRESS_AFTER"]
@@ -162,6 +162,7 @@ def evaluate(action: str, result: dict, ssh_rc: int,
     print(f"Objectcaches geslaagd: {result['CACHE_OK']}/{expected}; cachefouten: {result['CACHE_FAILED']}")
     print(f"Aangetroffen foutmeldingen: {result['ERROR_SIGNATURES']}; WP-CLI-checkfouten: {result['CHECK_FAILED']}")
     print(f"Resterende door WP-CLI detecteerbare updates: {result['PENDING_UPDATES']}")
+    print(f"Niet-ondersteunde roots na update: {result['UNSUPPORTED_AFTER']}; multisite: {result['MULTISITE_AFTER']}")
     print("Extra plugin-cache: LiteSpeed en WP Rocket, indien actief; fouten tellen mee")
     print("Hostinger server-/CDN-cache: afhankelijk van bestaande updater; niet apart geverifieerd")
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -176,6 +177,7 @@ def evaluate(action: str, result: dict, ssh_rc: int,
             and result["CACHE_OK"] == expected and result["CACHE_FAILED"] == 0
             and result["ERROR_SIGNATURES"] == 0 and result["CHECK_FAILED"] == 0
             and result["PENDING_UPDATES"] == 0
+            and result["UNSUPPORTED_AFTER"] == 0 and result["MULTISITE_AFTER"] == 0
             and result["INVENTORY_AFTER_SHA256"] == expected_inventory
             and good == len(domains) and expected > 0)
     print("RESULTAAT: GESLAAGD" if full else "RESULTAAT: NIET VOLLEDIG - bekijk privé-serverlog")
