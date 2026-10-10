@@ -57,6 +57,7 @@ jobs:
           HOSTINGER_SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
           HOSTINGER_SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
           SITE_ID: ${{ inputs.site }}
+          HOSTING_ENV: ${{ inputs.hosting }}
           MODE: ${{ inputs.mode }}
           CONFIRM: ${{ inputs.confirm }}
         shell: bash
